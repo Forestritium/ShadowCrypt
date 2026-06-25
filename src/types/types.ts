@@ -7,7 +7,7 @@ export interface Profile {
   username: string;
   email: string | null;
   role: UserRole;
-  public_key: string | null; // base64-encoded ECDH public key
+  public_key: string | null; // base64-encoded X25519 public key (32 bytes raw)
   bio: string | null;
   created_at: string;
   username_last_changed: string | null; // ISO timestamp of last username change

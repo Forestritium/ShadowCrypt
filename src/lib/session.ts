@@ -5,7 +5,7 @@
 
 import {
   deriveVaultKey,
-  generateECDHKeyPair,
+  generateX25519KeyPair,
   toBase64,
   computeFingerprint,
 } from './crypto';
@@ -97,8 +97,8 @@ export async function unlockSession(
       identityKP = await getIdentityKeyPair();
     }
     if (!identityKP) {
-      // No backup available — generate a fresh key pair
-      const newKP = await generateECDHKeyPair();
+      // No backup available — generate a fresh X25519 key pair
+      const newKP = generateX25519KeyPair();
       identityKP = {
         privateKeyBase64: newKP.privateKeyBase64,
         publicKeyBase64: newKP.publicKeyBase64,
