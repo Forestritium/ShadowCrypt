@@ -10,8 +10,8 @@ ShadowCrypt is built around a zero-knowledge security model. This document descr
 
 | Version | Supported |
 |---|---|
-| Latest (`main`) | ✅ Active security support |
-| Older releases | ❌ No longer maintained |
+| Latest (`main`) | Active security support |
+| Older releases | No longer maintained |
 
 Always run the latest version.
 

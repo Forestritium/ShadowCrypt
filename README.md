@@ -28,17 +28,17 @@ ShadowCrypt is an **end-to-end encrypted** messaging app built on a **zero-knowl
 
 | Feature | Details |
 |---|---|
-| 🔐 **End-to-End Encryption** | Double Ratchet (Signal Protocol) — per-message unique keys, full forward secrecy |
-| 🗝️ **Vault Encryption** | All local data (messages, contacts, sessions) encrypted with Argon2id + AES-256-GCM |
-| 📨 **Real-time Messaging** | Supabase Realtime relay — ciphertext only, messages deleted after delivery |
-| 🖼️ **Image Sharing** | Encrypted image upload to Supabase Storage, 10 images/day per user |
-| 💬 **Reply & Quote** | Thread-aware reply with quoted message preview |
-| 👥 **Contact Requests** | Accept/decline incoming requests; full block list management |
-| 🔑 **Recovery Phrase** | BIP-39 12-word mnemonic for password reset without email |
-| 🔒 **Password Strength** | zxcvbn-based strength estimation + live requirements checklist |
-| 🌙 **Dark / Light Mode** | System-aware theme with manual override |
-| 📱 **Responsive** | Full desktop + mobile experience |
-| 🔔 **Notifications** | Anonymous push notifications — never reveals sender identity |
+| **End-to-End Encryption** | Double Ratchet (Signal Protocol) — per-message unique keys, full forward secrecy |
+| **Vault Encryption** | All local data (messages, contacts, sessions) encrypted with Argon2id + AES-256-GCM |
+| **Real-time Messaging** | Supabase Realtime relay — ciphertext only, messages deleted after delivery |
+| **Image Sharing** | Encrypted image upload to Supabase Storage, 10 images/day per user |
+| **Reply & Quote** | Thread-aware reply with quoted message preview |
+| **Contact Requests** | Accept/decline incoming requests; full block list management |
+| **Recovery Phrase** | BIP-39 12-word mnemonic for password reset without email |
+| **Password Strength** | zxcvbn-based strength estimation + live requirements checklist |
+| **Dark / Light Mode** | System-aware theme with manual override |
+| **Responsive** | Full desktop + mobile experience |
+| **Notifications** | Anonymous push notifications — never reveals sender identity |
 
 ---
 

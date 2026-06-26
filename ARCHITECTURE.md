@@ -167,8 +167,8 @@ Registration:
 Reset flow:
   user submits phrase
   Edge Function: hashMnemonic(input) == profiles.mnemonic_hash?
-    ✅ Yes → adminClient.auth.admin.updateUserById(newPassword)
-    ❌ No  → return 400 error
+    Yes → adminClient.auth.admin.updateUserById(newPassword)
+    No  → return 400 error
 ```
 
 ---

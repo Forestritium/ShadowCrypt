@@ -66,7 +66,7 @@ Your recovery phrase is a 12-word sequence generated when your account is create
 2. Confirm the action — your old phrase will be invalidated immediately.
 3. Save the new phrase.
 
-> ⚠️ If you lose your recovery phrase and forget your password, your account **cannot be recovered**.
+> **Warning:** If you lose your recovery phrase and forget your password, your account **cannot be recovered**.
 
 ---
 
@@ -172,7 +172,7 @@ If you have forgotten your password but have your **recovery phrase**:
 4. Set a **new password**.
 5. Click **Reset Password**.
 
-> ⚠️ After a password reset, your locally encrypted vault is cleared. Your message history on the current device will be lost (messages are already deleted from the relay). Contacts are re-synced from the server.
+> **Warning:** After a password reset, your locally encrypted vault is cleared. Your message history on the current device will be lost (messages are already deleted from the relay). Contacts are re-synced from the server.
 
 ---
 
