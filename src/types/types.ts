@@ -13,7 +13,8 @@ export interface Profile {
   username_last_changed: string | null; // ISO timestamp of last username change
   avatar_url: string | null;            // public Storage URL for profile picture
   avatar_private: boolean;              // when true, hide avatar from other users
-  mnemonic_hash: string | null;           // SHA-256 of recovery phrase (for forgot-password)
+  mnemonic_hash: string | null;           // PBKDF2-SHA256 hash of recovery phrase (for forgot-password)
+  mnemonic_salt: string | null;           // base64 random 16-byte salt for mnemonic_hash; NULL = legacy unsalted format
   password_version: number;             // 0 = legacy PIN, 1 = new complexity password
   vault_salt: string | null;            // base64 PBKDF2 salt — backed up so key can be re-derived on any device
   encrypted_private_key: string | null; // AES-GCM encrypted identity key pair blob (cloud backup)

@@ -10,7 +10,7 @@ import {
   getStoredSaltBase64, getEncryptedIdentityKeyBlob,
   storeKdfVersion,
 } from '@/lib/localStore';
-import { generateMnemonic, hashMnemonic } from '@/lib/mnemonic';
+import { generateMnemonic, generateMnemonicHash } from '@/lib/mnemonic';
 
 export async function getProfile(userId: string): Promise<Profile | null> {
   const { data, error } = await supabase
@@ -355,9 +355,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       if (!user) throw new Error('Not authenticated');
       const mnemonic = generateMnemonic();
-      const hash = await hashMnemonic(mnemonic);
+      const { hash, saltBase64 } = await generateMnemonicHash(mnemonic);
       await storeMnemonic(mnemonic);
-      const { error } = await supabase.from('profiles').update({ mnemonic_hash: hash }).eq('id', user.id);
+      const { error } = await supabase
+        .from('profiles')
+        .update({ mnemonic_hash: hash, mnemonic_salt: saltBase64 })
+        .eq('id', user.id);
       if (error) throw error;
       return { mnemonic, error: null };
     } catch (error) {
