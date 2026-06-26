@@ -2,11 +2,23 @@
  * Stable module: contains only the AuthContextType interface and the AuthContext object.
  * Kept separate from AuthContext.tsx so React Fast Refresh never re-evaluates createContext(),
  * which would produce a new context identity and break useAuth() in already-mounted consumers.
+ *
+ * IMPORTANT: Do NOT import from @/lib/* here. Those modules pull in crypto.ts, session.ts,
+ * localStore.ts etc. — all of which are in the HMR boundary. Any such import would cause
+ * this file to be re-evaluated on hot reload, defeating the entire purpose of this split.
+ * Only React and pure @supabase/supabase-js / @/types/types type imports are safe here.
  */
 import { createContext } from 'react';
 import type { User } from '@supabase/supabase-js';
 import type { Profile } from '@/types/types';
-import type { SessionInfo } from '@/lib/session';
+
+/** Inlined from @/lib/session to keep this module out of the HMR dependency graph. */
+export interface SessionInfo {
+  userId: string;
+  username: string;
+  publicKeyBase64: string;
+  fingerprint: string;
+}
 
 export interface AuthContextType {
   user: User | null;

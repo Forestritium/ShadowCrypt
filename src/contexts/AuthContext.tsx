@@ -3,7 +3,7 @@ import { supabase } from '@/db/supabase';
 import type { User } from '@supabase/supabase-js';
 import type { Profile } from '@/types/types';
 import { toast } from 'sonner';
-import { unlockSession, lockSession, restoreSessionInfo, type SessionInfo } from '@/lib/session';
+import { unlockSession, lockSession, restoreSessionInfo } from '@/lib/session';
 import {
   clearAllData, restoreVaultKey, reEncryptVaultWithNewPassword,
   storeMnemonic, deleteMnemonic,
@@ -11,7 +11,7 @@ import {
   storeKdfVersion,
 } from '@/lib/localStore';
 import { generateMnemonic, generateMnemonicHash } from '@/lib/mnemonic';
-import { AuthContext } from '@/contexts/AuthContext.types';
+import { AuthContext, type SessionInfo } from '@/contexts/AuthContext.types';
 
 export async function getProfile(userId: string): Promise<Profile | null> {
   const { data, error } = await supabase
