@@ -367,7 +367,7 @@ export default function ChatPage() {
             </DialogTitle>
             <DialogDescription className="text-muted-foreground text-pretty">
               We have updated our Privacy Policy. We recommend you check it out to understand
-              how your data is protected in ShadowCrypt v2.3.1.
+              how your data is protected in ShadowCrypt v2.4.0.
             </DialogDescription>
           </DialogHeader>
           <div className="flex gap-2 mt-1">
