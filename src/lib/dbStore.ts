@@ -139,7 +139,7 @@ export async function getMessagesFromDB(
     return [];
   }
 
-  // Decrypt each message's content with the vault key before returning
+  // Decrypt each message's content and image key with the vault key before returning
   const decrypted = await Promise.all(
     (data ?? []).map(async row => ({
       id: row.id as string,
@@ -152,7 +152,10 @@ export async function getMessagesFromDB(
       isOwn: row.is_own as boolean,
       imageUrl: (row.image_url as string | null) ?? null,
       imageStoragePath: (row.image_storage_path as string | null) ?? null,
-      imageKeyBase64: (row.image_key_b64 as string | null) ?? null,
+      // Decrypt the vault-encrypted AES image key before returning to the UI
+      imageKeyBase64: row.image_key_b64
+        ? await decryptContent(row.image_key_b64 as string)
+        : null,
       replyTo: row.reply_to_id
         ? {
             id: row.reply_to_id as string,
@@ -168,7 +171,10 @@ export async function getMessagesFromDB(
 }
 
 export async function saveMessageToDB(ownerId: string, message: LocalMessage): Promise<void> {
-  const encryptedContent = await encryptContent(message.content);
+  const [encryptedContent, encryptedImageKey] = await Promise.all([
+    encryptContent(message.content),
+    message.imageKeyBase64 ? encryptContent(message.imageKeyBase64) : Promise.resolve(null),
+  ]);
   const { error } = await supabase
     .from('messages')
     .upsert(
@@ -185,7 +191,8 @@ export async function saveMessageToDB(ownerId: string, message: LocalMessage): P
         is_own: message.isOwn,
         image_url: message.imageUrl ?? null,
         image_storage_path: message.imageStoragePath ?? null,
-        image_key_b64: message.imageKeyBase64 ?? null,
+        // AES image key encrypted with vault key — never stored in plaintext
+        image_key_b64: encryptedImageKey,
         reply_to_id: message.replyTo?.id ?? null,
         reply_to_sender: message.replyTo?.senderUsername ?? null,
         reply_to_snippet: message.replyTo?.snippet ?? null,
@@ -207,7 +214,10 @@ export async function saveMessageToDBFull(
   recipientId: string,
   message: LocalMessage
 ): Promise<void> {
-  const encryptedContent = await encryptContent(message.content);
+  const [encryptedContent, encryptedImageKey] = await Promise.all([
+    encryptContent(message.content),
+    message.imageKeyBase64 ? encryptContent(message.imageKeyBase64) : Promise.resolve(null),
+  ]);
   const { error } = await supabase
     .from('messages')
     .upsert(
@@ -222,7 +232,8 @@ export async function saveMessageToDBFull(
         is_own: message.isOwn,
         image_url: message.imageUrl ?? null,
         image_storage_path: message.imageStoragePath ?? null,
-        image_key_b64: message.imageKeyBase64 ?? null,
+        // AES image key encrypted with vault key — never stored in plaintext
+        image_key_b64: encryptedImageKey,
         reply_to_id: message.replyTo?.id ?? null,
         reply_to_sender: message.replyTo?.senderUsername ?? null,
         reply_to_snippet: message.replyTo?.snippet ?? null,
@@ -267,8 +278,11 @@ export function subscribeToMessages(
       async (payload) => {
         const row = payload.new as Record<string, unknown>;
         if (row.conversation_id !== conversationId) return;
-        // Decrypt the vault-encrypted content before surfacing to the UI
+        // Decrypt vault-encrypted content and AES image key before surfacing to the UI
         const content = await decryptContent(row.content as string);
+        const imageKeyBase64 = row.image_key_b64
+          ? await decryptContent(row.image_key_b64 as string)
+          : null;
         onMessage({
           id: row.id as string,
           conversationId: row.conversation_id as string,
@@ -280,7 +294,7 @@ export function subscribeToMessages(
           isOwn: row.is_own as boolean,
           imageUrl: (row.image_url as string | null) ?? null,
           imageStoragePath: (row.image_storage_path as string | null) ?? null,
-          imageKeyBase64: (row.image_key_b64 as string | null) ?? null,
+          imageKeyBase64,
           replyTo: row.reply_to_id
             ? {
                 id: row.reply_to_id as string,
