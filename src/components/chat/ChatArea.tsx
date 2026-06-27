@@ -26,7 +26,7 @@ import { supabase } from '@/db/supabase';
 import { ReplyPreviewBar } from './ReplyPreviewBar';
 import { QuotedMessage } from './QuotedMessage';
 import { playNotificationSound, unlockAudio, isMuted, setMuted, isDND } from '@/lib/notificationSound';
-import { useScreenshotPrevention } from '@/hooks/use-screenshot-prevention';
+import { useCaptureDeterrence } from '@/hooks/use-capture-deterrence';
 
 const IMAGE_DAILY_LIMIT = 10;
 
@@ -301,8 +301,8 @@ export function ChatArea({
   // Timestamp (ms) when the current conversation was opened — sound only plays
   // for messages that arrive AFTER this moment (i.e. live incoming, not unread backlog)
   const conversationOpenedAt = useRef<number>(0);
-  // Screenshot prevention
-  const { containerProps: screenshotContainerProps, overlayVisible } = useScreenshotPrevention();
+  // Capture deterrence — context-menu suppression + visibility overlay
+  const { containerProps: captureDeterrenceProps, overlayVisible } = useCaptureDeterrence();
 
   // Unlock Web Audio on first user interaction (satisfies browser autoplay policy)
   useEffect(() => {
@@ -662,17 +662,17 @@ export function ChatArea({
   const isRequestPending = isOutgoingPending || isIncomingPending;
 
   return (
-    <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-background" onContextMenu={screenshotContainerProps.onContextMenu}>
+    <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-background" onContextMenu={captureDeterrenceProps.onContextMenu}>
 
-      {/* ── Screen capture warning overlay ── */}
+      {/* ── Capture deterrence overlay ── */}
       {overlayVisible && (
         <div className="absolute inset-0 z-[100] bg-background/95 backdrop-blur-sm flex flex-col items-center justify-center gap-4 pointer-events-none select-none">
           <Lock className="w-10 h-10 text-primary" />
           <p className="text-sm font-semibold text-foreground text-balance text-center px-8">
-            Screen capture protection is active
+            Chat content hidden
           </p>
           <p className="text-xs text-muted-foreground text-center px-8 text-pretty">
-            This conversation is end-to-end encrypted. Content is hidden while the window is not in focus.
+            Content is hidden while this window is not in focus. Note: OS-level screen capture cannot be blocked by a web app.
           </p>
         </div>
       )}

@@ -326,11 +326,15 @@ describe('DH ratchet key rotation', () => {
     expect(aS.RK).not.toBe(rkInitial);
   });
 
-  it('sender DH public key in envelope matches session DHs pub', async () => {
+  it('sender DH public key in encrypted header matches session DHs pub', async () => {
     const { aliceSession } = await initPair();
     const { envelope, updatedSession } = await ratchetEncrypt(aliceSession, 'test');
-    const dhsPubFromSession = updatedSession.DHs.split('|')[1];
-    expect(envelope.header.senderPublicKey).toBe(dhsPubFromSession);
+    // v2.4.0+: header is encrypted; cleartext header field must be absent
+    expect(envelope.encryptedHeader).toBeDefined();
+    expect(typeof envelope.encryptedHeader).toBe('string');
+    expect((envelope as { header?: unknown }).header).toBeUndefined();
+    // Session must have a header key
+    expect(updatedSession.HK).toBeDefined();
   });
 });
 

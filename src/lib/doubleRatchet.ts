@@ -5,11 +5,12 @@
  * Each message gets a unique derived key → full forward secrecy.
  * Ratchet sessions are stored encrypted in the local vault.
  *
- * Deviation from full Signal spec: the envelope header (senderPublicKey,
- * messageNumber, prevChainLength) is sent in cleartext. Signal's "sealed
- * sender" header encryption is deferred to a future release. The metadata
- * exposure is limited to the ephemeral DH public key and per-conversation
- * counters — message content is always fully encrypted.
+ * Header encryption (v2.4.0+): envelope header fields (senderPublicKey,
+ * messageNumber, prevChainLength) are AES-256-GCM encrypted with a shared
+ * header key HK = HKDF(sharedSecret, zeros, "ShadowCrypt-HK", 32) derived
+ * independently by both parties from the initial X25519 exchange.  The relay
+ * operator sees only an opaque encryptedHeader blob.
+ * Sessions without HK (created before v2.4.0) fall back to cleartext headers.
  */
 
 import type { RatchetSession, EncryptedEnvelope } from '@/types/types';
@@ -52,7 +53,10 @@ export async function initSessionSender(
   theirPubB64: string,
 ): Promise<RatchetSession> {
   const shared = x25519DH(ourPrivB64, theirPubB64);
-  const rk = await hkdf(shared, ZEROS32, 'ShadowCrypt-Init', 32);
+  const [rk, hkBytes] = await Promise.all([
+    hkdf(shared, ZEROS32, 'ShadowCrypt-Init', 32),
+    hkdf(shared, ZEROS32, 'ShadowCrypt-HK', 32),
+  ]);
 
   const eph = generateX25519KeyPair();
   const dhOut = x25519DH(eph.privateKeyBase64, theirPubB64);
@@ -67,6 +71,7 @@ export async function initSessionSender(
     CKr: null,
     Ns: 0, Nr: 0, PN: 0,
     MKSKIPPED: {},
+    HK: toBase64(hkBytes),
   };
 }
 
@@ -82,7 +87,10 @@ export async function initSessionReceiver(
   theirPubB64: string,
 ): Promise<RatchetSession> {
   const shared = x25519DH(ourPrivB64, theirPubB64);
-  const rk = await hkdf(shared, ZEROS32, 'ShadowCrypt-Init', 32);
+  const [rk, hkBytes] = await Promise.all([
+    hkdf(shared, ZEROS32, 'ShadowCrypt-Init', 32),
+    hkdf(shared, ZEROS32, 'ShadowCrypt-HK', 32),
+  ]);
 
   return {
     conversationId,
@@ -93,7 +101,34 @@ export async function initSessionReceiver(
     CKr: null,
     Ns: 0, Nr: 0, PN: 0,
     MKSKIPPED: {},
+    HK: toBase64(hkBytes),
   };
+}
+
+// ─── Header encryption helpers ────────────────────────────────────────────────
+
+interface PlaintextHeader {
+  spk: string;  // senderPublicKey
+  mn: number;   // messageNumber
+  pcl: number;  // prevChainLength
+}
+
+/** Encrypt header fields → base64(12-byte IV ‖ AES-256-GCM ciphertext). */
+async function encryptHeader(hkB64: string, h: PlaintextHeader): Promise<string> {
+  const key = await importAESKey(fromBase64(hkB64));
+  const { ciphertext, iv } = await aesEncrypt(key, new TextEncoder().encode(JSON.stringify(h)));
+  const combined = new Uint8Array(12 + ciphertext.byteLength);
+  combined.set(iv, 0);
+  combined.set(ciphertext, 12);
+  return toBase64(combined);
+}
+
+/** Decrypt base64(12-byte IV ‖ AES-256-GCM ciphertext) → header fields. */
+async function decryptHeader(hkB64: string, blob: string): Promise<PlaintextHeader> {
+  const key = await importAESKey(fromBase64(hkB64));
+  const combined = fromBase64(blob);
+  const plain = await aesDecrypt(key, combined.slice(12), combined.slice(0, 12));
+  return JSON.parse(new TextDecoder().decode(plain)) as PlaintextHeader;
 }
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
@@ -167,15 +202,13 @@ export async function ratchetEncrypt(
   const [newCKs, mk] = await kdfCK(fromBase64(s.CKs!));
   const { ciphertext, iv } = await encryptWithMK(mk, plaintext);
 
-  const envelope: EncryptedEnvelope = {
-    header: {
-      senderPublicKey: dhsPub(s),
-      messageNumber: s.Ns,
-      prevChainLength: s.PN,
-    },
-    ciphertext,
-    iv,
-  };
+  const headerFields: PlaintextHeader = { spk: dhsPub(s), mn: s.Ns, pcl: s.PN };
+
+  // Encrypt header when HK is available (v2.4.0+); fall back to cleartext for
+  // legacy stored sessions that pre-date header encryption.
+  const envelope: EncryptedEnvelope = s.HK
+    ? { encryptedHeader: await encryptHeader(s.HK, headerFields), ciphertext, iv }
+    : { header: { senderPublicKey: headerFields.spk, messageNumber: headerFields.mn, prevChainLength: headerFields.pcl }, ciphertext, iv };
 
   return {
     envelope,
@@ -188,10 +221,27 @@ export async function ratchetDecrypt(
   envelope: EncryptedEnvelope,
 ): Promise<{ plaintext: string; updatedSession: RatchetSession }> {
   let s = { ...session, MKSKIPPED: { ...session.MKSKIPPED } };
-  const { header, ciphertext, iv } = envelope;
+  const { ciphertext, iv } = envelope;
+
+  // Resolve header — decrypt if encrypted, fall back to cleartext for legacy envelopes
+  let senderPublicKey: string;
+  let messageNumber: number;
+  let prevChainLength: number;
+
+  if (envelope.encryptedHeader && s.HK) {
+    const h = await decryptHeader(s.HK, envelope.encryptedHeader);
+    senderPublicKey = h.spk;
+    messageNumber = h.mn;
+    prevChainLength = h.pcl;
+  } else if (envelope.header) {
+    // Backward-compatible path for pre-v2.4.0 envelopes
+    ({ senderPublicKey, messageNumber, prevChainLength } = envelope.header);
+  } else {
+    throw new Error('Envelope missing both encryptedHeader and header — cannot decrypt.');
+  }
 
   // Check for a previously skipped message key
-  const skKey = `${header.senderPublicKey}:${header.messageNumber}`;
+  const skKey = `${senderPublicKey}:${messageNumber}`;
   if (s.MKSKIPPED[skKey]) {
     const mk = fromBase64(s.MKSKIPPED[skKey]);
     const { [skKey]: _, ...rest } = s.MKSKIPPED;
@@ -200,12 +250,12 @@ export async function ratchetDecrypt(
   }
 
   // DH ratchet step when the sender has advanced their ratchet key
-  if (header.senderPublicKey !== s.DHr) {
-    if (s.CKr) s = await skipKeys(s, header.prevChainLength);
-    s = await dhRatchetStep(s, header.senderPublicKey);
+  if (senderPublicKey !== s.DHr) {
+    if (s.CKr) s = await skipKeys(s, prevChainLength);
+    s = await dhRatchetStep(s, senderPublicKey);
   }
 
-  s = await skipKeys(s, header.messageNumber);
+  s = await skipKeys(s, messageNumber);
 
   if (!s.CKr) throw new Error('No receiving chain key');
   const [newCKr, mk] = await kdfCK(fromBase64(s.CKr));

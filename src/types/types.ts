@@ -87,6 +87,15 @@ export interface RatchetSession {
   PN: number; // previous chain sending messages count
   // Skipped message keys for out-of-order delivery
   MKSKIPPED: Record<string, string>; // key: "pubkey:n" → base64 message key
+  /**
+   * Header encryption key (base64, 32 bytes).
+   * Derived from the initial X25519 shared secret via HKDF("ShadowCrypt-HK").
+   * Both parties derive the same key independently.  Used to encrypt the
+   * envelope header so that senderPublicKey / messageNumber / prevChainLength
+   * are opaque to the relay operator.
+   * Optional for backward compatibility with sessions created before v2.4.0.
+   */
+  HK?: string;
 }
 
 // Relay message (transient, never stored server-side long-term)
@@ -100,14 +109,26 @@ export interface RelayMessage {
 }
 
 export interface EncryptedEnvelope {
-  header: {
-    senderPublicKey: string; // ephemeral DH public key
+  /**
+   * AES-256-GCM encrypted header (base64 IV‖ciphertext).
+   * Present in envelopes created by v2.4.0+.
+   * Decrypts to JSON: { spk: string; mn: number; pcl: number }
+   *   spk = senderPublicKey, mn = messageNumber, pcl = prevChainLength
+   */
+  encryptedHeader?: string;
+  /**
+   * Cleartext header — present only in envelopes from sessions before v2.4.0.
+   * Retained for backward compatibility with in-flight messages.
+   * @deprecated Use encryptedHeader for all new sessions.
+   */
+  header?: {
+    senderPublicKey: string;
     messageNumber: number;
     prevChainLength: number;
   };
   ciphertext: string; // base64 AES-256-GCM ciphertext
-  iv: string; // base64 IV
-  authTag?: string; // optional, included in ciphertext for WebCrypto
+  iv: string;         // base64 IV
+  authTag?: string;   // optional, included in ciphertext for WebCrypto
 }
 
 export interface ConversationPreview {

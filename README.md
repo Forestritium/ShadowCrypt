@@ -11,16 +11,33 @@
 
 ---
 
+## Security model — what this app actually does
+
+| Property | Implementation |
+|---|---|
+| **Message confidentiality** | Double Ratchet (X25519 + HKDF-SHA256 + AES-256-GCM) — per-message unique keys |
+| **Forward secrecy** | Ratchet advances after every message; past keys are not recoverable |
+| **Header privacy** | Envelope headers (ratchet public key, counters) encrypted with a shared header key derived from the initial X25519 exchange — relay cannot read metadata |
+| **Zero-knowledge relay** | Server routes opaque ciphertext; messages deleted from relay after delivery |
+| **At-rest encryption** | All DB columns (text, image keys) vault-wrapped with AES-256-GCM before write |
+| **Key derivation** | Argon2id (64 MB / 3 iter) — resistant to GPU/ASIC brute-force |
+| **Image encryption** | AES-256-GCM per-image key, generated client-side; key travels inside ratchet ciphertext; storage bucket is private, served via signed URLs |
+| **Identity keys** | X25519 key pair generated in-browser; private key never leaves the device |
+| **Password recovery** | BIP-39 12-word mnemonic (128-bit entropy); only its SHA-256 hash is stored server-side |
+
+**Honest limitations:** no web app can block OS-level screen capture; capture deterrence raises friction but is not a security guarantee. The header key is static per session (not per ratchet step), which is simpler than Signal's full "sealed sender" but still opaque to a relay observer. See [SECURITY.md](SECURITY.md) for the full threat model including what ShadowCrypt does *not* protect against.
+
+---
+
 ## What is ShadowCrypt?
 
 ShadowCrypt is an **end-to-end encrypted** messaging app built on a **zero-knowledge relay**: the server routes opaque ciphertext between clients and never holds keys, plaintext, or anything that would allow decryption. All cryptographic operations happen entirely in the browser using the Web Crypto API and audited WebAssembly libraries.
 
 - **End-to-end encrypted** messages using the Signal Protocol Double Ratchet (X25519 + HKDF-SHA256 + AES-256-GCM)
+- **Encrypted headers** — ratchet metadata opaque to the relay operator
 - **Vault encryption** of all local data with Argon2id-derived keys
 - **BIP-39 mnemonic recovery** for password resets without server involvement
 - **Zero plaintext at rest** — the Supabase database only ever stores opaque ciphertext
-
-> **Transparency note — message headers**: The Double Ratchet envelope header (`senderPublicKey`, `messageNumber`, `prevChainLength`) travels in cleartext. This is a deliberate simplification: full Signal-style header encryption requires a separate header-key ratchet and is deferred to a future release. The metadata leak is limited to the DH ratchet public key and per-conversation counters — message content is always fully encrypted.
 
 ---
 
@@ -29,9 +46,10 @@ ShadowCrypt is an **end-to-end encrypted** messaging app built on a **zero-knowl
 | Feature | Details |
 |---|---|
 | **End-to-End Encryption** | Double Ratchet (Signal Protocol) — per-message unique keys, full forward secrecy |
+| **Header Encryption** | Ratchet envelope headers encrypted with shared header key — relay cannot read metadata |
 | **Vault Encryption** | All local data (messages, contacts, sessions) encrypted with Argon2id + AES-256-GCM |
 | **Real-time Messaging** | Supabase Realtime relay — ciphertext only, messages deleted after delivery |
-| **Image Sharing** | Encrypted image upload to Supabase Storage, 10 images/day per user |
+| **Image Sharing** | AES-256-GCM encrypted image upload; key inside ratchet ciphertext; private bucket + signed URLs |
 | **Reply & Quote** | Thread-aware reply with quoted message preview |
 | **Contact Requests** | Accept/decline incoming requests; full block list management |
 | **Recovery Phrase** | BIP-39 12-word mnemonic for password reset without email |
@@ -49,7 +67,7 @@ ShadowCrypt is an **end-to-end encrypted** messaging app built on a **zero-knowl
 | **Frontend** | React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui |
 | **Cryptography** | Web Crypto API, hash-wasm (Argon2id), @scure/bip39 |
 | **Backend** | Supabase (Postgres, Auth, Realtime, Storage, Edge Functions) |
-| **Key Exchange** | ECDH P-256 |
+| **Key Exchange** | X25519 (ECDH) |
 | **Message Encryption** | Signal Protocol Double Ratchet (AES-256-GCM + HKDF-SHA256) |
 | **Vault KDF** | Argon2id (v1) / PBKDF2-SHA256 @ 310k iterations (v0 legacy) |
 | **Password Recovery** | BIP-39 (128-bit entropy, 12 words) |
@@ -60,8 +78,8 @@ ShadowCrypt is an **end-to-end encrypted** messaging app built on a **zero-knowl
 
 ### Prerequisites
 
-- Node.js ≥ 18
-- pnpm ≥ 8
+- Node.js >= 18
+- pnpm >= 8
 - A [Supabase](https://supabase.com) project
 
 ### 1. Clone & Install
@@ -121,8 +139,8 @@ ShadowCrypt/
 │   │   ├── AuthContext.tsx   # Auth state, vault unlock, mnemonic management
 │   │   └── ThemeContext.tsx  # Dark/light theme
 │   ├── lib/
-│   │   ├── crypto.ts         # AES-GCM, ECDH, HKDF, PBKDF2, Argon2id
-│   │   ├── doubleRatchet.ts  # Signal Protocol Double Ratchet
+│   │   ├── crypto.ts         # AES-GCM, X25519, HKDF, PBKDF2, Argon2id
+│   │   ├── doubleRatchet.ts  # Signal Protocol Double Ratchet + header encryption
 │   │   ├── relay.ts          # Supabase messaging relay
 │   │   ├── localStore.ts     # Encrypted IndexedDB vault
 │   │   ├── dbStore.ts        # Supabase contacts & messages store
@@ -145,24 +163,6 @@ ShadowCrypt/
 
 ---
 
-## Security Model
-
-ShadowCrypt is built on a **zero-knowledge** principle:
-
-1. **Message encryption** — Every message is encrypted with a unique per-message key before leaving the device. The server routes ciphertext only and deletes it after delivery.
-
-2. **Vault encryption** — All locally-stored data (messages, contacts, ratchet sessions, identity keys) is encrypted in IndexedDB using AES-256-GCM with a key derived from the user's password via Argon2id.
-
-3. **Key exchange** — ECDH P-256 public keys are stored in Supabase profiles. The private key never leaves the device.
-
-4. **Forward secrecy** — The Double Ratchet advances the chain key after every message. Compromise of one message key does not expose past or future messages.
-
-5. **Password recovery** — A BIP-39 mnemonic is generated locally on registration. Its SHA-256 hash is stored on the server. The server verifies the mnemonic hash and resets the auth password without ever seeing the mnemonic itself.
-
-For a full threat model and responsible disclosure policy, see [SECURITY.md](SECURITY.md).
-
----
-
 ## Contributing
 
 We welcome contributions! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
@@ -174,4 +174,3 @@ We welcome contributions! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before 
 ShadowCrypt is licensed under the **GNU Affero General Public License v3.0**. See [LICENSE](LICENSE) for details.
 
 > Under the AGPL, if you modify ShadowCrypt and run it as a network service, you must release your modifications under the same license.
-

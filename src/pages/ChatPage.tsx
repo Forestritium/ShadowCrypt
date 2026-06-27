@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { autoDeleteOldMessages } from '@/lib/localStore';
 import { getContactsFromDB, saveContactToDB, removeContactAndMessagesFromDB } from '@/lib/dbStore';
-import { useScreenshotPrevention } from '@/hooks/use-screenshot-prevention';
+import { useCaptureDeterrence } from '@/hooks/use-capture-deterrence';
 import {
   subscribeToRelay,
   fetchPendingRelayMessages,
@@ -62,8 +62,8 @@ export default function ChatPage() {
   const { user, profile, session, loading, signOut } = useAuth();
   const navigate = useNavigate();
 
-  // Document-level screenshot prevention — active for the entire chat page
-  useScreenshotPrevention();
+  // Document-level capture deterrence — active for the entire chat page
+  useCaptureDeterrence();
 
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<ConversationPreview | null>(null);

@@ -24,12 +24,14 @@ Always run the latest version.
 | Threat | Mitigation |
 |---|---|
 | **Server compromise** | The server only stores encrypted ciphertext. It cannot read messages, contacts, or identity keys. |
-| **Database leak** | All message content is AES-256-GCM encrypted before being written to Supabase. A raw DB dump reveals only opaque blobs. |
+| **Database leak** | All message content and image keys are AES-256-GCM encrypted with the user's vault key before being written to Supabase. A raw DB dump reveals only opaque blobs. |
 | **Man-in-the-middle on the relay** | Messages are encrypted end-to-end with the Double Ratchet before being sent to the relay. The relay only routes ciphertext. |
 | **Retrospective decryption** | The Double Ratchet provides full forward secrecy. Each message uses a unique derived key. Compromise of one key does not expose past or future messages. |
+| **Ratchet header metadata** | Envelope headers (senderPublicKey, messageNumber, prevChainLength) are AES-256-GCM encrypted with a shared header key (HK) derived from the initial X25519 exchange. The relay operator cannot read ratchet metadata for new sessions. |
 | **Weak passwords** | Argon2id (64 MB memory, 3 iterations) is used for vault key derivation — GPU/ASIC cracking is computationally expensive. |
 | **Password reset without email** | BIP-39 mnemonic is verified by SHA-256 hash comparison server-side. The mnemonic itself is never sent to or stored on the server. |
 | **Notification metadata** | Browser notifications are anonymous — they never reveal the sender's identity or message content. |
+| **Encrypted image exposure** | Chat images are AES-256-GCM encrypted before upload. The decryption key travels inside the Double Ratchet ciphertext and is vault-wrapped before DB storage. The storage bucket is private; images are served via short-lived signed URLs only. |
 
 ### What ShadowCrypt does NOT protect against
 
@@ -40,6 +42,7 @@ Always run the latest version.
 | **Browser extension attacks** | Malicious browser extensions with access to the page context can intercept plaintext before encryption. |
 | **Physical access** | The vault key is held in `sessionStorage` during an active session for usability. Physical or OS-level access to the browser could expose it. |
 | **Metadata analysis** | ShadowCrypt hides message content but not the fact that two users are communicating or the frequency of communication. |
+| **OS-level screen capture** | No web application can block OS-level screenshots (PrintScreen, Cmd+Shift+3/4, Snipping Tool, screen recorders). The capture deterrence feature hides content on focus loss and intercepts keyboard shortcuts, but this raises friction for casual capture only — it is not a security guarantee. |
 | **Denial of Service** | No specific DDoS mitigations are implemented at the application level. |
 
 ---
@@ -59,10 +62,11 @@ New accounts always use v1. v0 accounts are prompted to migrate on first login.
 
 ShadowCrypt implements a simplified Signal Protocol **Double Ratchet**:
 
-- **DH Ratchet**: ECDH P-256 key pairs. Each ratchet step advances the root key.
+- **DH Ratchet**: X25519 key pairs. Each ratchet step advances the root key.
 - **KDF Chain**: HMAC-SHA256-based symmetric ratchet for per-message key derivation.
 - **Message encryption**: AES-256-GCM with a 12-byte random IV prepended to ciphertext.
-- **Initialisation**: ECDH shared secret → HKDF-SHA256 → initial root key.
+- **Initialisation**: X25519 shared secret → HKDF-SHA256 → initial root key.
+- **Header encryption**: Envelope headers encrypted with a shared header key (HK) derived via HKDF("ShadowCrypt-HK") from the initial shared secret. Hides ratchet metadata from the relay.
 
 ### Vault Encryption
 
@@ -72,7 +76,7 @@ All data in IndexedDB is encrypted as individual JSON blobs:
 
 ### Identity Keys
 
-- ECDH P-256 key pair generated in-browser on first registration.
+- X25519 key pair generated in-browser on first registration.
 - Public key stored in Supabase `profiles` table.
 - Private key stored encrypted in the local vault (never transmitted).
 
@@ -119,6 +123,8 @@ We follow [responsible disclosure](https://cheatsheetseries.owasp.org/cheatsheet
 
 2. **No perfect forward secrecy for stored messages** — Forward secrecy applies to the relay (messages deleted after delivery). Messages stored in the local encrypted IndexedDB vault are all protected by the same vault key. If the vault key is compromised, all stored messages are exposed.
 
-3. **Daily image limit** — The 10 images/day cap is enforced server-side via a Postgres function. It mitigates storage abuse but is not a security boundary.
+3. **Static header key** — The header encryption key (HK) is derived once from the initial X25519 exchange and does not rotate with each DH ratchet step. This protects headers from a passive relay observer but does not provide per-ratchet-step header key rotation as in the full Signal "sealed sender" specification.
 
-4. **Self-hosted deployments** — If you self-host ShadowCrypt, you are responsible for securing your Supabase project, applying migrations, and keeping dependencies up to date.
+4. **Daily image limit** — The 10 images/day cap is enforced server-side via a Postgres function. It mitigates storage abuse but is not a security boundary.
+
+5. **Self-hosted deployments** — If you self-host ShadowCrypt, you are responsible for securing your Supabase project, applying migrations, and keeping dependencies up to date.
