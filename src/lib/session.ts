@@ -7,6 +7,7 @@ import {
   deriveVaultKey,
   generateX25519KeyPair,
   toBase64,
+  fromBase64,
   computeFingerprint,
 } from './crypto';
 import {
@@ -105,6 +106,16 @@ export async function unlockSession(
       };
       await saveIdentityKeyPair(identityKP);
     }
+  }
+
+  // Guard: if the restored key is a legacy uncompressed P-256 key (65 bytes),
+  // it is incompatible with X25519 DH. Silently replace it with a fresh X25519
+  // pair so the profile sync below will push the new key to the server.
+  if (fromBase64(identityKP.publicKeyBase64).length !== 32) {
+    console.warn('[ShadowCrypt] Legacy P-256 identity key detected — regenerating X25519 key pair.');
+    const newKP = generateX25519KeyPair();
+    identityKP = { privateKeyBase64: newKP.privateKeyBase64, publicKeyBase64: newKP.publicKeyBase64 };
+    await saveIdentityKeyPair(identityKP);
   }
 
   // Always use the LOCAL identity key as the canonical public key.

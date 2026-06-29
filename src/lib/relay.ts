@@ -887,3 +887,49 @@ export async function fetchAcceptedContacts(
       publicKey: p.public_key as string,
     }));
 }
+
+/**
+ * Batch-refresh public keys for all contacts by comparing their stored key
+ * against their current profiles.public_key.  Any contact whose key has
+ * changed gets updated in the local DB immediately.
+ *
+ * Returns a map of contactId → freshPublicKey for every contact whose key
+ * was stale, so the caller can merge the changes into React state without a
+ * full DB reload.
+ */
+export async function refreshContactPublicKeys(
+  ownerId: string,
+  contactIds: string[],
+): Promise<Map<string, string>> {
+  const updated = new Map<string, string>();
+  if (contactIds.length === 0) return updated;
+
+  const { data: profiles } = await supabase
+    .from('profiles')
+    .select('id, public_key')
+    .in('id', contactIds);
+
+  if (!profiles) return updated;
+
+  // Fetch current stored keys in one go so we can diff them
+  const { data: storedRows } = await supabase
+    .from('contacts')
+    .select('contact_id, public_key')
+    .eq('owner_id', ownerId)
+    .in('contact_id', contactIds);
+
+  const storedMap = new Map<string, string>(
+    (storedRows ?? []).map(r => [r.contact_id as string, r.public_key as string])
+  );
+
+  for (const profile of profiles) {
+    const freshKey = profile.public_key as string | null;
+    if (!freshKey) continue;
+    const storedKey = storedMap.get(profile.id as string);
+    if (storedKey === freshKey) continue; // already up to date
+    await updateContactPublicKey(ownerId, profile.id as string, freshKey);
+    updated.set(profile.id as string, freshKey);
+  }
+
+  return updated;
+}

@@ -30,6 +30,7 @@ import {
   deleteContactRequestBetween,
   fetchPendingRemovals,
   deleteRelayMessagesBetween,
+  refreshContactPublicKeys,
 } from '@/lib/relay';
 import type { Contact, LocalMessage, ConversationPreview, RelayMessage, ContactRequest } from '@/types/types';
 import { makeConversationId } from '@/lib/session';
@@ -120,6 +121,17 @@ export default function ChatPage() {
     try {
       const c = await getContactsFromDB(user.id);
       setContacts(c);
+      // Silently refresh any stale public keys from live profiles (handles the
+      // P-256 → X25519 migration without requiring contacts to re-login).
+      if (c.length > 0) {
+        const updatedKeys = await refreshContactPublicKeys(user.id, c.map(ct => ct.id));
+        if (updatedKeys.size > 0) {
+          setContacts(prev => prev.map(ct => {
+            const fresh = updatedKeys.get(ct.id);
+            return fresh ? { ...ct, publicKey: fresh } : ct;
+          }));
+        }
+      }
     } catch (err) {
       console.error('[ShadowCrypt] Failed to load contacts:', err);
     }
