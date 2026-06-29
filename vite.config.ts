@@ -11,4 +11,11 @@ export default defineConfig({
     },
     dedupe: ["react", "react-dom", "react-router", "react-router-dom"],
   },
+  // Ensure PWA assets are served with correct MIME types in dev
+  server: {
+    headers: {
+      // Allow the manifest to be fetched cross-origin (required by some browsers)
+      "Access-Control-Allow-Origin": "*",
+    },
+  },
 });
