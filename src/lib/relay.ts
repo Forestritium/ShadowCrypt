@@ -20,7 +20,6 @@ import {
   getIdentityKeyPair,
 } from './localStore';
 import { saveMessageToDBFull, updateContactPublicKey } from './dbStore';
-import { LegacyKeyFormatError } from './crypto';
 import type { LocalMessage } from '@/types/types';
 
 const IMAGE_DAILY_LIMIT = 10;
@@ -170,7 +169,7 @@ export async function sendEncryptedMessage(
           effectivePubKey
         );
       } catch (err) {
-        if (err instanceof LegacyKeyFormatError) {
+        if ((err as Error).message?.startsWith('LEGACY_KEY_FORMAT')) {
           // The stored key is a legacy P-256 key — fetch the latest key from the profile.
           const freshKey = await getUserPublicKey(recipientId);
           if (!freshKey || freshKey === effectivePubKey) {

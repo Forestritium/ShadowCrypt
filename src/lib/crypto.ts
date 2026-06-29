@@ -123,14 +123,16 @@ export function x25519PublicKeyFromPrivate(privateKeyBase64: string): string {
 /**
  * Thrown when a remote public key is in the legacy uncompressed P-256 format
  * (65 bytes: 0x04 || X || Y) instead of the expected 32-byte X25519 raw key.
- * The contact must re-login so their profile is updated with a fresh X25519 key.
+ * Tagged with code 'LEGACY_KEY_FORMAT' for catch-site discrimination.
+ * Intentionally NOT an exported named class — an uppercase-named export in a
+ * utility module confuses React Fast Refresh into treating this file as a
+ * component module, which corrupts ReactCurrentDispatcher during HMR.
  */
-export class LegacyKeyFormatError extends Error {
-  readonly code = 'LEGACY_KEY_FORMAT';
-  constructor() {
-    super('LEGACY_KEY_FORMAT: Contact has an old P-256 key. They must re-login to update it.');
-    this.name = 'LegacyKeyFormatError';
-  }
+function makeLegacyKeyError(): Error {
+  return Object.assign(
+    new Error('LEGACY_KEY_FORMAT: Contact has an old P-256 key. Ask them to log in again to update it.'),
+    { code: 'LEGACY_KEY_FORMAT' }
+  );
 }
 
 /** Perform an X25519 DH operation; returns the 32-byte shared secret. */
@@ -139,7 +141,7 @@ export function x25519DH(privateKeyBase64: string, publicKeyBase64: string): Uin
   if (remoteKey.length !== 32) {
     // 65-byte key = legacy uncompressed P-256 (0x04 || X || Y). X25519 and P-256
     // use completely different curves — the X coordinate alone is NOT usable.
-    throw new LegacyKeyFormatError();
+    throw makeLegacyKeyError();
   }
   return x25519.getSharedSecret(fromBase64(privateKeyBase64), remoteKey);
 }
