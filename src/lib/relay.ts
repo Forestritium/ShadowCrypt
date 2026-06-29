@@ -19,7 +19,8 @@ import {
   deleteRatchetSession,
   getIdentityKeyPair,
 } from './localStore';
-import { saveMessageToDBFull } from './dbStore';
+import { saveMessageToDBFull, updateContactPublicKey } from './dbStore';
+import { LegacyKeyFormatError } from './crypto';
 import type { LocalMessage } from '@/types/types';
 
 const IMAGE_DAILY_LIMIT = 10;
@@ -157,13 +158,47 @@ export async function sendEncryptedMessage(
   const myKP = await getIdentityKeyPair();
   if (!myKP) throw new Error('Identity key pair not found. Please re-login.');
 
-  if (!session) {
-    session = await initSessionSender(
-      conversationId,
-      myKP.privateKeyBase64,
-      recipientPublicKey
-    );
-  }
+  // Resolve the effective recipient public key, auto-healing stale/legacy keys.
+  let effectivePubKey = recipientPublicKey;
+
+  const tryInitSession = async () => {
+    if (!session) {
+      try {
+        session = await initSessionSender(
+          conversationId,
+          myKP.privateKeyBase64,
+          effectivePubKey
+        );
+      } catch (err) {
+        if (err instanceof LegacyKeyFormatError) {
+          // The stored key is a legacy P-256 key — fetch the latest key from the profile.
+          const freshKey = await getUserPublicKey(recipientId);
+          if (!freshKey || freshKey === effectivePubKey) {
+            // Contact has not yet re-logged-in with an X25519 key.
+            throw new Error(
+              'LEGACY_KEY_FORMAT: This contact needs to re-login to update their encryption key before you can message them.'
+            );
+          }
+          // Fresh key available — update stored contact and retry once.
+          await updateContactPublicKey(senderId, recipientId, freshKey);
+          effectivePubKey = freshKey;
+          session = await initSessionSender(
+            conversationId,
+            myKP.privateKeyBase64,
+            effectivePubKey
+          );
+        } else {
+          throw err;
+        }
+      }
+    }
+  };
+
+  await tryInitSession();
+
+  // TypeScript cannot narrow through the async closure — session is guaranteed
+  // non-null here because tryInitSession throws on every failure path.
+  if (!session) throw new Error('Failed to initialize ratchet session.');
 
   // If there is an image attachment, embed the storage path and AES key INSIDE the
   // ratchet plaintext so they travel encrypted end-to-end and are never visible to

@@ -596,7 +596,14 @@ export function ChatArea({
       onMessageSent();
     } catch (err) {
       setMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'failed' } : m));
-      toast.error('Failed to send. Please try again.');
+      const msg = (err as Error).message ?? '';
+      if (msg.startsWith('LEGACY_KEY_FORMAT')) {
+        toast.error('Cannot send message', {
+          description: `@${contact.username} needs to re-login to update their encryption key.`,
+        });
+      } else {
+        toast.error('Failed to send. Please try again.');
+      }
       console.error('[ShadowCrypt] Send error:', err);
     } finally {
       setSending(false);

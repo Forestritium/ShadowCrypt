@@ -66,8 +66,8 @@ importers:
         specifier: ^0.576.0
         version: 0.576.0(react@18.3.1)
       miaoda-react-devkit:
-        specifier: 0.1.1-beta.14
-        version: 0.1.1-beta.14(rolldown-vite@7.3.1(@types/node@24.2.1)(jiti@1.21.7)(yaml@2.8.1))
+        specifier: 0.1.1-beta.15
+        version: 0.1.1-beta.15(rolldown-vite@7.3.1(@types/node@24.2.1)(jiti@1.21.7)(yaml@2.8.1))
       next-themes:
         specifier: ^0.4.6
         version: 0.4.6(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -1416,8 +1416,8 @@ packages:
     resolution: {integrity: sha512-8q7VEgMJW4J8tcfVPy8g09NcQwZdbwFEqhe/WZkoIzjn/3TGDwtOCYtXGxA3O8tPzpczCCDgv+P2P5y00ZJOOg==}
     engines: {node: '>= 8'}
 
-  miaoda-react-devkit@0.1.1-beta.14:
-    resolution: {integrity: sha512-4PpZRBSIbYuATDMGbvdzwGzHqxzOx85PMhsZRdqf3BRBXf1pjPrv5b/xHfSQ1vRa0MV0TNB5y2IhVWKV0aXg7A==}
+  miaoda-react-devkit@0.1.1-beta.15:
+    resolution: {integrity: sha512-GkJDMiXB6wK35I9IxRDZP5l5F0OeMrBIzuabrHvtnKiZWcTbwZQW4gUCA7ftdlmxVr2xbejSHDUicc/ZOryBUw==}
     peerDependencies:
       '@sentry/core': '>=8.0.0'
       '@sentry/react': '>=8.0.0'
@@ -3165,7 +3165,7 @@ snapshots:
 
   merge2@1.4.1: {}
 
-  miaoda-react-devkit@0.1.1-beta.14(rolldown-vite@7.3.1(@types/node@24.2.1)(jiti@1.21.7)(yaml@2.8.1)):
+  miaoda-react-devkit@0.1.1-beta.15(rolldown-vite@7.3.1(@types/node@24.2.1)(jiti@1.21.7)(yaml@2.8.1)):
     dependencies:
       '@babel/parser': 7.29.0
       '@babel/traverse': 7.29.0

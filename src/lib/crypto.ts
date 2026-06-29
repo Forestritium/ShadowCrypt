@@ -120,9 +120,28 @@ export function x25519PublicKeyFromPrivate(privateKeyBase64: string): string {
   return toBase64(x25519.getPublicKey(fromBase64(privateKeyBase64)));
 }
 
+/**
+ * Thrown when a remote public key is in the legacy uncompressed P-256 format
+ * (65 bytes: 0x04 || X || Y) instead of the expected 32-byte X25519 raw key.
+ * The contact must re-login so their profile is updated with a fresh X25519 key.
+ */
+export class LegacyKeyFormatError extends Error {
+  readonly code = 'LEGACY_KEY_FORMAT';
+  constructor() {
+    super('LEGACY_KEY_FORMAT: Contact has an old P-256 key. They must re-login to update it.');
+    this.name = 'LegacyKeyFormatError';
+  }
+}
+
 /** Perform an X25519 DH operation; returns the 32-byte shared secret. */
 export function x25519DH(privateKeyBase64: string, publicKeyBase64: string): Uint8Array {
-  return x25519.getSharedSecret(fromBase64(privateKeyBase64), fromBase64(publicKeyBase64));
+  const remoteKey = fromBase64(publicKeyBase64);
+  if (remoteKey.length !== 32) {
+    // 65-byte key = legacy uncompressed P-256 (0x04 || X || Y). X25519 and P-256
+    // use completely different curves — the X coordinate alone is NOT usable.
+    throw new LegacyKeyFormatError();
+  }
+  return x25519.getSharedSecret(fromBase64(privateKeyBase64), remoteKey);
 }
 
 // Keep legacy aliases so callers that haven't migrated yet compile without changes.
