@@ -12,6 +12,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { autoDeleteOldMessages } from '@/lib/localStore';
+import { supabase } from '@/db/supabase';
 import { getContactsFromDB, saveContactToDB, removeContactAndMessagesFromDB, deleteConversationMessagesForBoth } from '@/lib/dbStore';
 import { useCaptureDeterrence } from '@/hooks/use-capture-deterrence';
 import {
@@ -119,6 +120,7 @@ export default function ChatPage() {
   const loadLocalData = useCallback(async () => {
     if (!user) return;
     try {
+      // getContactsFromDB always recomputes fingerprint from the stored public_key
       const c = await getContactsFromDB(user.id);
       setContacts(c);
       // Silently refresh any stale public keys from live profiles (handles the
@@ -126,9 +128,19 @@ export default function ChatPage() {
       if (c.length > 0) {
         const updatedKeys = await refreshContactPublicKeys(user.id, c.map(ct => ct.id));
         if (updatedKeys.size > 0) {
+          // Recompute fingerprints for all contacts with updated keys so the
+          // displayed fingerprint is always consistent with the stored key.
+          const fingerprintUpdates = await Promise.all(
+            [...updatedKeys.entries()].map(async ([id, key]) => ({
+              id,
+              publicKey: key,
+              fingerprint: await computeFingerprint(key),
+            }))
+          );
+          const fpMap = new Map(fingerprintUpdates.map(u => [u.id, u]));
           setContacts(prev => prev.map(ct => {
-            const fresh = updatedKeys.get(ct.id);
-            return fresh ? { ...ct, publicKey: fresh } : ct;
+            const update = fpMap.get(ct.id);
+            return update ? { ...ct, publicKey: update.publicKey, fingerprint: update.fingerprint } : ct;
           }));
         }
       }
@@ -320,11 +332,27 @@ export default function ChatPage() {
       }
     });
 
+    // Subscribe to contacts table UPDATE events for this user.
+    // When a contact's public_key changes (e.g. P-256→X25519 migration via DB
+    // trigger), reload contacts so the displayed fingerprint updates live without
+    // requiring the user to restart.
+    supabase
+      .channel(`contacts-keywatch-${userId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'contacts', filter: `owner_id=eq.${userId}` },
+        () => { loadLocalData(); }
+      )
+      .subscribe();
+
     return () => {
       unsubscribeRelay();
       unsubscribeRemovals();
       unsubscribeRequests();
       unsubscribeOutgoing();
+
+      // Unsubscribe from contacts key-change channel
+      supabase.channel(`contacts-keywatch-${userId}`).unsubscribe();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]); // only re-subscribe on actual login/logout
