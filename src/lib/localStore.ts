@@ -221,6 +221,11 @@ export async function saveRatchetSession(session: RatchetSession): Promise<void>
   await setEncrypted(`ratchet:${session.conversationId}`, session);
 }
 
+/** Delete the ratchet session for a conversation (forces fresh re-initialization). */
+export async function deleteRatchetSession(conversationId: string): Promise<void> {
+  await deleteEncrypted(`ratchet:${conversationId}`);
+}
+
 // ========================
 // IDENTITY KEYS
 // ========================

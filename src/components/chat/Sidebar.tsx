@@ -34,9 +34,10 @@ import type { Contact, ConversationPreview, Profile, ContactRequest } from '@/ty
 import { AddContactDialog } from './AddContactDialog';
 import { makeConversationId } from '@/lib/session';
 import { useTheme } from '@/contexts/ThemeContext';
-import { acceptContactRequest, rejectContactRequest, cancelContactRequest, blockUser, deleteContactRequestBetween } from '@/lib/relay';
+import { acceptContactRequest, rejectContactRequest, cancelContactRequest, blockUser, deleteContactRequestBetween, deleteRelayMessagesBetween } from '@/lib/relay';
 import { saveContactToDB, removeContactAndMessagesFromDB } from '@/lib/dbStore';
 import { supabase } from '@/db/supabase';
+import { deleteConversationMessagesForBoth } from '@/lib/dbStore';
 import { computeFingerprint } from '@/lib/crypto';
 import { toast } from 'sonner';
 import logoUrl from '@/assets/logo.svg';
@@ -146,9 +147,15 @@ function SidebarContent({
   const handleRemoveContact = async (contact: Contact) => {
     const convId = makeConversationId(currentUserId, contact.id);
     try {
+      // 1. Delete this user's local DB copy + ratchet session
       await removeContactAndMessagesFromDB(currentUserId, contact.id, convId);
+      // 2. Delete contact_requests between both users
       await deleteContactRequestBetween(currentUserId, contact.id);
-      // Notify the other side for mutual removal
+      // 3. Delete ALL relay messages in both directions (in-flight messages)
+      await deleteRelayMessagesBetween(currentUserId, contact.id);
+      // 4. Delete the OTHER user's DB copy of messages too (full cascade)
+      await deleteConversationMessagesForBoth(currentUserId, contact.id, convId);
+      // 5. Notify the other user so they remove us on their end immediately
       await onContactRemoved?.(contact.id);
       toast.success(`@${contact.username} removed from contacts.`);
       onConversationDeselect?.(convId);

@@ -10,7 +10,7 @@
 
 import { supabase } from '@/db/supabase';
 import { encryptObject, decryptObject, computeFingerprint } from '@/lib/crypto';
-import { getEncryptionKey } from '@/lib/localStore';
+import { getEncryptionKey, deleteRatchetSession } from '@/lib/localStore';
 import type { Contact, LocalMessage } from '@/types/types';
 
 // ── CONTENT ENCRYPTION HELPERS ───────────────────────────────────────────────
@@ -117,6 +117,9 @@ export async function removeContactAndMessagesFromDB(
   await Promise.all([
     deleteContactFromDB(ownerId, contactId),
     deleteConversationMessagesFromDB(ownerId, conversationId),
+    // Clear the ratchet session so that if the contact is re-added later,
+    // the Double Ratchet starts fresh with a clean, synchronized state.
+    deleteRatchetSession(conversationId),
   ]);
 }
 
@@ -257,6 +260,24 @@ export async function deleteConversationMessagesFromDB(
     .eq('conversation_id', conversationId);
 
   if (error) console.error('[dbStore] deleteMessages error:', error.message);
+}
+
+/**
+ * Delete all messages for a conversation from BOTH users' message tables.
+ * Uses the SECURITY DEFINER server function so the caller can remove rows
+ * whose owner_id is the other user (normally blocked by RLS).
+ */
+export async function deleteConversationMessagesForBoth(
+  userIdA: string,
+  userIdB: string,
+  conversationId: string
+): Promise<void> {
+  const { error } = await supabase.rpc('delete_conversation_messages_for_both', {
+    p_user_a: userIdA,
+    p_user_b: userIdB,
+    p_conversation_id: conversationId,
+  });
+  if (error) console.error('[dbStore] deleteConversationMessagesForBoth error:', error.message);
 }
 
 /** Subscribe to new messages for a specific conversation via Realtime. */

@@ -12,7 +12,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { autoDeleteOldMessages } from '@/lib/localStore';
-import { getContactsFromDB, saveContactToDB, removeContactAndMessagesFromDB } from '@/lib/dbStore';
+import { getContactsFromDB, saveContactToDB, removeContactAndMessagesFromDB, deleteConversationMessagesForBoth } from '@/lib/dbStore';
 import { useCaptureDeterrence } from '@/hooks/use-capture-deterrence';
 import {
   subscribeToRelay,
@@ -28,6 +28,8 @@ import {
   notifyContactRemoval,
   fetchAcceptedContacts,
   deleteContactRequestBetween,
+  fetchPendingRemovals,
+  deleteRelayMessagesBetween,
 } from '@/lib/relay';
 import type { Contact, LocalMessage, ConversationPreview, RelayMessage, ContactRequest } from '@/types/types';
 import { makeConversationId } from '@/lib/session';
@@ -253,6 +255,9 @@ export default function ChatPage() {
       const convId = makeConversationId(currentUser.id, removerId);
       await removeContactAndMessagesFromDB(currentUser.id, removerId, convId);
       await deleteContactRequestBetween(currentUser.id, removerId);
+      // Also purge in-flight relay messages and the other user's DB copy
+      await deleteRelayMessagesBetween(currentUser.id, removerId);
+      await deleteConversationMessagesForBoth(currentUser.id, removerId, convId);
       setSelectedConversation(prev => prev?.id === convId ? null : prev);
       loadLocalData();
       toast.message('Contact removed', { description: `@${contact.username} removed you from their contacts.` });
@@ -324,10 +329,30 @@ export default function ChatPage() {
   const sessionUserId = session?.userId;
   useEffect(() => {
     if (!sessionUserId || !user) return;
+
+    // Drain any pending relay messages (may have been skipped before session was ready)
     fetchPendingRelayMessages(user.id).then(async pending => {
       for (const msg of pending) {
         await handleIncomingRelay(msg);
       }
+    });
+
+    // Drain any contact-removal notifications that arrived while we were offline.
+    // Realtime only delivers live INSERT events — existing rows must be polled.
+    fetchPendingRemovals(user.id).then(async removerIds => {
+      for (const removerId of removerIds) {
+        const allContacts = await getContactsFromDB(user.id);
+        const contact = allContacts.find(c => c.id === removerId);
+        if (!contact) continue;
+        const convId = makeConversationId(user.id, removerId);
+        await removeContactAndMessagesFromDB(user.id, removerId, convId);
+        await deleteContactRequestBetween(user.id, removerId);
+        await deleteRelayMessagesBetween(user.id, removerId);
+        await deleteConversationMessagesForBoth(user.id, removerId, convId);
+        setSelectedConversation(prev => prev?.id === convId ? null : prev);
+        toast.message('Contact removed', { description: `@${contact.username} removed you from their contacts.` });
+      }
+      if (removerIds.length > 0) loadLocalData();
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionUserId]); // fires exactly once when session first becomes valid

@@ -16,6 +16,7 @@ import {
 import {
   getRatchetSession,
   saveRatchetSession,
+  deleteRatchetSession,
   getIdentityKeyPair,
 } from './localStore';
 import { saveMessageToDBFull } from './dbStore';
@@ -227,9 +228,9 @@ export async function receiveAndDecryptMessage(
   senderUsername: string,
   senderPublicKey: string
 ): Promise<LocalMessage | null> {
+  const conversationId = relayMessage.conversation_id;
   try {
     const envelope: EncryptedEnvelope = JSON.parse(relayMessage.encrypted_payload);
-    const conversationId = relayMessage.conversation_id;
 
     // Get or initialize receiving session
     let session = await getRatchetSession(conversationId);
@@ -237,6 +238,21 @@ export async function receiveAndDecryptMessage(
     if (!myKP) return null;
 
     if (!session) {
+      session = await initSessionReceiver(
+        conversationId,
+        myKP.privateKeyBase64,
+        myKP.publicKeyBase64,
+        senderPublicKey
+      );
+    }
+
+    // Detect stale session: envelope uses encrypted headers (v2.4.0+) but the
+    // stored session predates header encryption and lacks the HK field.
+    // Clear the stale session so the next attempt re-initializes it with HK.
+    if (envelope.encryptedHeader && !session.HK) {
+      console.warn('[ShadowCrypt] Stale session missing HK — clearing for re-init on next attempt');
+      await deleteRatchetSession(conversationId);
+      // Re-initialize immediately so this message can still be decrypted
       session = await initSessionReceiver(
         conversationId,
         myKP.privateKeyBase64,
@@ -281,8 +297,9 @@ export async function receiveAndDecryptMessage(
       replyTo: extras.replyTo ?? null,
     };
 
-    // Save receiver's copy to DB (persists across logout/login)
-    await saveMessageToDBFull(myUserId, relayMessage.sender_id, localMsg);
+    // Save receiver's copy to DB — owner_id = myUserId (the recipient saving their copy),
+    // recipient_id = myUserId (the actual recipient of this message, not the sender).
+    await saveMessageToDBFull(myUserId, myUserId, localMsg);
 
     // Delete from relay after successful decryption (zero-knowledge relay)
     await supabase
@@ -295,6 +312,10 @@ export async function receiveAndDecryptMessage(
     return localMsg;
   } catch (err) {
     console.error('[ShadowCrypt] Failed to decrypt relay message:', err);
+    // If decryption failed (possibly due to a session state mismatch), clear the
+    // ratchet session so the next fetch attempt re-initializes it from scratch.
+    // The relay message is NOT deleted here so it can be retried.
+    await deleteRatchetSession(conversationId).catch(() => {/* ignore cleanup errors */});
     return null;
   }
 }
@@ -564,6 +585,24 @@ export async function deleteContactRequestBetween(
     .eq('receiver_id', userId);
 }
 
+/**
+ * Delete all relay messages in both directions between two users.
+ * Uses the server-side SECURITY DEFINER function so that each side's
+ * relay messages can be cleared regardless of who initiates the deletion.
+ */
+export async function deleteRelayMessagesBetween(
+  userIdA: string,
+  userIdB: string
+): Promise<void> {
+  const { error } = await supabase.rpc('delete_relay_messages_between', {
+    p_user_a: userIdA,
+    p_user_b: userIdB,
+  });
+  if (error) {
+    console.error('[ShadowCrypt] deleteRelayMessagesBetween error:', error.message);
+  }
+}
+
 // ========================
 // BLOCK / UNBLOCK
 // ========================
@@ -715,6 +754,25 @@ export async function notifyContactRemoval(removedId: string): Promise<void> {
   await supabase
     .from('contact_removals')
     .insert({ remover_id: user.id, removed_id: removedId });
+}
+
+/**
+ * Fetch any pending contact removal notifications that arrived while the user
+ * was offline (Realtime only delivers live inserts, not existing rows).
+ * Returns an array of remover_ids.
+ */
+export async function fetchPendingRemovals(userId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('contact_removals')
+    .select('remover_id, id')
+    .eq('removed_id', userId);
+  if (error || !data || data.length === 0) return [];
+
+  // Clean up processed rows
+  const ids = data.map(r => r.id as string);
+  await supabase.from('contact_removals').delete().in('id', ids);
+
+  return data.map(r => r.remover_id as string);
 }
 
 /**
