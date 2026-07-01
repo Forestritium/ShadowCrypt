@@ -212,7 +212,10 @@ export default function AuthPage() {
   const [mnemonicToShow, setMnemonicToShow] = useState<string | null>(null);
   const [pendingSplash, setPendingSplash] = useState(false);
 
-  const validateUsername = (val: string) => /^[a-zA-Z0-9_]{3,20}$/.test(val);
+  // Usernames are always lowercase (Supabase normalises emails before the DB
+  // trigger stores split_part(email,'@',1)). Allow only lowercase so what the
+  // user types is exactly what is stored and looked up.
+  const validateUsername = (val: string) => /^[a-z0-9_]{3,20}$/.test(val);
 
   const handleLogin = async () => {
     if (!validateUsername(username)) { toast.error('Invalid username format.'); return; }
@@ -368,7 +371,7 @@ export default function AuthPage() {
                 <div className="space-y-4">
                   <div className="space-y-1.5">
                     <Label className="text-sm font-normal text-foreground">Username</Label>
-                    <Input value={username} onChange={e => setUsername(e.target.value.trim())}
+                    <Input value={username} onChange={e => setUsername(e.target.value.trim().toLowerCase())}
                       placeholder="your_username" className="bg-input border-border px-3 h-10 text-sm"
                       onKeyDown={e => e.key === 'Enter' && document.getElementById('login-pwd')?.focus()} />
                   </div>
@@ -418,7 +421,7 @@ export default function AuthPage() {
                   <div className="space-y-1.5">
                     <Label className="text-sm font-normal text-foreground">Username</Label>
                     <Input value={username}
-                      onChange={e => { setUsername(e.target.value.trim()); setUsernameError(''); }}
+                      onChange={e => { setUsername(e.target.value.trim().toLowerCase()); setUsernameError(''); }}
                       placeholder="choose_a_username" className="bg-input border-border px-3 h-10 text-sm"
                       onKeyDown={e => e.key === 'Enter' && handleCheckUsername()} />
                     {usernameError && (
@@ -500,7 +503,7 @@ export default function AuthPage() {
                     <>
                       <div className="space-y-1.5">
                         <Label className="text-sm font-normal text-foreground">Username</Label>
-                        <Input value={username} onChange={e => { setUsername(e.target.value.trim()); setForgotError(''); }}
+                        <Input value={username} onChange={e => { setUsername(e.target.value.trim().toLowerCase()); setForgotError(''); }}
                           placeholder="your_username" className="bg-input border-border px-3 h-10 text-sm" />
                       </div>
                       <div className="space-y-1.5">

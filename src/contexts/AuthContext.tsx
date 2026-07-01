@@ -69,23 +69,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const checkUsernameAvailable = async (username: string): Promise<boolean> => {
+    // Profiles are always stored lowercase (Supabase normalises emails before the
+    // DB trigger runs split_part), so we must query with a lowercased value too.
     const { data } = await supabase
       .from('profiles')
       .select('id')
-      .eq('username', username)
+      .eq('username', username.toLowerCase())
       .maybeSingle();
     return !data;
   };
 
   const signUpWithUsername = async (username: string, password: string) => {
     try {
-      const email = `${username}@shadowcrypt.com`;
+      // Normalise to lowercase so the Supabase email "user@shadowcrypt.com" and
+      // the profiles.username set by the DB trigger always match.
+      const normalised = username.toLowerCase();
+      const email = `${normalised}@shadowcrypt.com`;
       const { data, error } = await supabase.auth.signUp({ email, password });
       if (error) throw error;
       if (data.user) {
         // New accounts always use Argon2id (v1) for maximum brute-force resistance
         await storeKdfVersion(1);
-        const sessionInfo = await unlockSession(data.user.id, username, password, null, null, 1);
+        const sessionInfo = await unlockSession(data.user.id, normalised, password, null, null, 1);
         // Back up vault salt + encrypted key pair to Supabase so the user can recover
         // their identity on any device or after clearing browser data
         const [saltB64, keyBlob] = await Promise.all([
@@ -112,7 +117,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signInWithUsername = async (username: string, password: string) => {
     try {
-      const email = `${username}@shadowcrypt.com`;
+      // Always normalise to lowercase — profiles.username and Supabase auth emails
+      // are stored lowercase (Supabase lowercases emails; the DB trigger derives
+      // the username via split_part on that already-lowercased email).
+      // Without this, typing "Alice" to log in constructs "Alice@shadowcrypt.com"
+      // which, while Supabase auth resolves case-insensitively, would store the
+      // mixed-case value in SessionInfo and cause profile lookups to miss.
+      const normalised = username.toLowerCase();
+      const email = `${normalised}@shadowcrypt.com`;
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
       if (data.user) {
@@ -128,9 +140,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         const kdfVersion = profileData?.kdf_version ?? 0;
+        // Use the profile's stored username as the canonical value so the session
+        // always reflects exactly what is in the DB, regardless of how the user
+        // typed it at the login prompt.
+        const canonicalUsername = profileData?.username ?? normalised;
         const sessionInfo = await unlockSession(
           data.user.id,
-          username,
+          canonicalUsername,
           password,
           profileData?.public_key ?? null,
           profileData?.encrypted_private_key ?? null,   // cloud backup for key restoration
