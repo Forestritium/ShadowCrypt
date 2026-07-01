@@ -11,8 +11,8 @@ import SettingsPage from '@/pages/SettingsPage';
 const App: React.FC = () => {
   return (
     <ThemeProvider>
-      <AuthProvider>
-        <Router>
+      <Router>
+        <AuthProvider>
           <Routes>
             <Route path="/auth" element={<AuthPage />} />
             <Route path="/chat" element={<ChatPage />} />
@@ -22,8 +22,8 @@ const App: React.FC = () => {
             <Route path="*" element={<Navigate to="/auth" replace />} />
           </Routes>
           <Toaster position="top-right" richColors closeButton />
-        </Router>
-      </AuthProvider>
+        </AuthProvider>
+      </Router>
     </ThemeProvider>
   );
 };
