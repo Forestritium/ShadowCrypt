@@ -1,55 +1,22 @@
 // ShadowCrypt Service Worker
 // Minimal SW to satisfy PWA installability requirements.
-// Caches the app shell on install for offline resilience.
+// No caching is intentional — all message data is encrypted and stored in
+// IndexedDB by the app; serving stale assets could expose outdated crypto code.
 
-const CACHE_NAME = 'shadowcrypt-v2';
-
-// App shell resources to cache on install
-const PRECACHE_URLS = [
-  '/',
-  '/chat',
-  '/auth',
-  '/manifest.json',
-];
+const SW_VERSION = 'v1';
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      // Pre-cache silently; failures are non-fatal
-      return cache.addAll(PRECACHE_URLS).catch(() => {});
-    }).then(() => self.skipWaiting())
-  );
+  // Skip waiting so the new SW activates immediately
+  self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
-  // Remove old caches from previous SW versions
-  event.waitUntil(
-    caches.keys().then((cacheNames) =>
-      Promise.all(
-        cacheNames
-          .filter((name) => name !== CACHE_NAME)
-          .map((name) => caches.delete(name))
-      )
-    ).then(() => self.clients.claim())
-  );
+  // Claim all open clients so this SW controls them without a reload
+  event.waitUntil(self.clients.claim());
 });
 
+// Pass all fetch requests through to the network — no cache interception.
+// This ensures users always load the latest version of the app.
 self.addEventListener('fetch', (event) => {
-  // Network-first strategy: always try network, fall back to cache
-  event.respondWith(
-    fetch(event.request)
-      .then((response) => {
-        // Only cache successful same-origin GET requests
-        if (
-          response.ok &&
-          event.request.method === 'GET' &&
-          event.request.url.startsWith(self.location.origin)
-        ) {
-          const cloned = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, cloned));
-        }
-        return response;
-      })
-      .catch(() => caches.match(event.request))
-  );
+  event.respondWith(fetch(event.request));
 });
