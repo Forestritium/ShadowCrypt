@@ -20,13 +20,20 @@ import {
 } from '@/components/ui/dialog';
 import type { ConversationPreview, LocalMessage, Contact, ContactRequest, ReplyTo } from '@/types/types';
 import { getMessagesFromDB, subscribeToMessages } from '@/lib/dbStore';
-import { sendEncryptedMessage, uploadChatImage, ImageLimitError, getTodayImageCount, fetchAndDecryptChatImage } from '@/lib/relay';
+import {
+  sendEncryptedMessage,
+  uploadChatImage, ImageLimitError, getTodayImageCount, fetchAndDecryptChatImage,
+  uploadVoiceMessage, VoiceLimitError, getTodayVoiceDuration,
+} from '@/lib/relay';
 import { broadcastTyping, subscribeToTyping } from '@/lib/relay';
 import { supabase } from '@/db/supabase';
 import { ReplyPreviewBar } from './ReplyPreviewBar';
 import { QuotedMessage } from './QuotedMessage';
+import { VoiceRecordButton } from './VoiceRecordButton';
+import { VoiceMessageBubble } from './VoiceMessageBubble';
 import { playNotificationSound, unlockAudio, isMuted, setMuted, isDND } from '@/lib/notificationSound';
 import { useCaptureDeterrence } from '@/hooks/use-capture-deterrence';
+import { VOICE_DAILY_LIMIT_SECONDS } from '@/lib/voiceRecorder';
 
 const IMAGE_DAILY_LIMIT = 10;
 
@@ -204,6 +211,15 @@ function MessageBubble({ message, isSelf, showAvatar, senderInitial, onReply, on
               <Lock className="w-5 h-5 text-muted-foreground/50" />
             </div>
           )}
+          {/* Voice message player — decrypted lazily on first play */}
+          {message.voiceStoragePath && message.voiceKeyBase64 && (
+            <VoiceMessageBubble
+              storagePath={message.voiceStoragePath}
+              voiceKey={message.voiceKeyBase64}
+              duration={message.voiceDuration ?? 0}
+              isSelf={isSelf}
+            />
+          )}
           {message.content && (
             <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{message.content}</p>
           )}
@@ -257,6 +273,44 @@ function ImageLimitDialog({ open, resetAt, onClose }: { open: boolean; resetAt: 
   );
 }
 
+// ── Voice daily limit dialog ──────────────────────────────────────────────────
+function VoiceLimitDialog({
+  open, resetAt, remainingSeconds, onClose,
+}: { open: boolean; resetAt: Date | null; remainingSeconds: number; onClose: () => void }) {
+  const formatReset = (d: Date) =>
+    d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+  const totalMin = Math.floor(VOICE_DAILY_LIMIT_SECONDS / 60);
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-sm bg-card border-border">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-foreground">
+            <Clock className="w-5 h-5 text-primary" />
+            Daily Voice Limit Reached
+          </DialogTitle>
+          <DialogDescription className="text-muted-foreground text-pretty">
+            You can send up to <strong>{totalMin} minutes of voice messages per day</strong>.
+            {remainingSeconds > 0 && (
+              <> Only <strong>{remainingSeconds}s</strong> remaining today — your recording was too long.</>
+            )}
+          </DialogDescription>
+        </DialogHeader>
+        {resetAt && (
+          <div className="flex items-center gap-2 bg-primary/5 border border-primary/20 rounded-lg px-3 py-2.5 text-sm">
+            <Clock className="w-4 h-4 text-primary shrink-0" />
+            <span className="text-foreground">
+              Your limit resets today at <strong>{formatReset(resetAt)}</strong> (midnight UTC).
+            </span>
+          </div>
+        )}
+        <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90" onClick={onClose}>
+          Got it
+        </Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function ChatArea({
   conversation,
   currentUserId,
@@ -287,6 +341,12 @@ export function ChatArea({
   const [todayImageCount, setTodayImageCount] = useState(0);
   // Decrypted image blob URLs: messageId → objectURL (resolved from encrypted storage)
   const [decryptedImages, setDecryptedImages] = useState<Record<string, string>>({});
+  // Voice state
+  const [uploadingVoice, setUploadingVoice] = useState(false);
+  const [todayVoiceSeconds, setTodayVoiceSeconds] = useState(0);
+  const [voiceLimitOpen, setVoiceLimitOpen] = useState(false);
+  const [voiceLimitResetAt, setVoiceLimitResetAt] = useState<Date | null>(null);
+  const [voiceLimitRemaining, setVoiceLimitRemaining] = useState(0);
   // Unread divider: timestamp of the last message seen before this session opened
   const [unreadSinceTs, setUnreadSinceTs] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -517,6 +577,12 @@ export function ChatArea({
     getTodayImageCount(currentUserId).then(setTodayImageCount).catch(() => {});
   }, [currentUserId, conversation?.id]);
 
+  // Load today's voice duration when conversation changes
+  useEffect(() => {
+    if (!currentUserId) return;
+    getTodayVoiceDuration(currentUserId).then(setTodayVoiceSeconds).catch(() => {});
+  }, [currentUserId, conversation?.id]);
+
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -588,6 +654,9 @@ export function ChatArea({
       imageStoragePath: imageAttachment?.storagePath ?? null,
       imageKeyBase64: imageAttachment?.imageKeyBase64 ?? null,
       replyTo: currentReply,
+      voiceStoragePath: null,
+      voiceKeyBase64: null,
+      voiceDuration: null,
     };
     setMessages(prev => [...prev, optimistic]);
     setInput('');
@@ -617,6 +686,74 @@ export function ChatArea({
       setSending(false);
     }
   };
+
+  /** Called by VoiceRecordButton when a recording is ready to upload and send. */
+  const handleVoiceRecorded = useCallback(async (blob: Blob, durationSeconds: number, mimeType: string) => {
+    if (!conversation || uploadingVoice) return;
+    const contact = contacts.find(c => c.id === conversation.contact?.id);
+    if (!contact) { toast.error('Contact not found.'); return; }
+
+    const tempId = crypto.randomUUID();
+    setUploadingVoice(true);
+
+    let voiceAttachment: { storagePath: string; voiceKeyBase64: string; voiceDuration: number } | undefined;
+    try {
+      voiceAttachment = await uploadVoiceMessage(currentUserId, blob, durationSeconds, mimeType);
+      setTodayVoiceSeconds(s => s + durationSeconds);
+    } catch (err) {
+      if (err instanceof VoiceLimitError) {
+        setVoiceLimitResetAt(err.resetAt);
+        setVoiceLimitRemaining(err.remainingSeconds);
+        setVoiceLimitOpen(true);
+      } else {
+        toast.error('Voice upload failed. Please try again.');
+      }
+      setUploadingVoice(false);
+      return;
+    }
+    setUploadingVoice(false);
+
+    // Add optimistic voice message
+    const optimistic: LocalMessage = {
+      id: tempId,
+      conversationId: conversation.id,
+      senderId: currentUserId,
+      senderUsername: currentUsername,
+      content: '',
+      timestamp: Date.now(),
+      status: 'sent',
+      isOwn: true,
+      imageUrl: null,
+      imageStoragePath: null,
+      imageKeyBase64: null,
+      replyTo: null,
+      voiceStoragePath: voiceAttachment.storagePath,
+      voiceKeyBase64: voiceAttachment.voiceKeyBase64,
+      voiceDuration: voiceAttachment.voiceDuration,
+    };
+    setMessages(prev => [...prev, optimistic]);
+
+    try {
+      await sendEncryptedMessage(
+        currentUserId, currentUsername, contact.id,
+        conversation.id, '', contact.publicKey, tempId,
+        undefined, null, voiceAttachment
+      );
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'delivered' } : m));
+      onMessageSent();
+    } catch (err) {
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'failed' } : m));
+      const msg = (err as Error).message ?? '';
+      if (msg.startsWith('LEGACY_KEY_FORMAT')) {
+        toast.error('Cannot send voice message', {
+          description: `@${contact.username} needs to re-login to update their encryption key.`,
+        });
+      } else {
+        toast.error('Failed to send voice message. Please try again.');
+      }
+      console.error('[ShadowCrypt] Voice send error:', err);
+    }
+  }, [conversation, contacts, currentUserId, currentUsername, uploadingVoice, onMessageSent]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -938,7 +1075,7 @@ export function ChatArea({
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={uploadingImage || sending}
+                disabled={uploadingImage || sending || uploadingVoice}
                 className="w-10 h-10 rounded-xl flex items-center justify-center text-muted-foreground hover:text-primary hover:bg-muted transition-colors shrink-0 disabled:opacity-40"
                 aria-label="Attach image"
                 title={`Attach image (${IMAGE_DAILY_LIMIT - todayImageCount}/${IMAGE_DAILY_LIMIT} remaining today)`}
@@ -948,6 +1085,18 @@ export function ChatArea({
                   : <ImageIcon className="w-5 h-5" />
                 }
               </button>
+              {/* Voice record button */}
+              {uploadingVoice ? (
+                <div className="w-10 h-10 flex items-center justify-center shrink-0">
+                  <span className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                </div>
+              ) : (
+                <VoiceRecordButton
+                  onRecordingComplete={handleVoiceRecorded}
+                  usedSecondsToday={todayVoiceSeconds}
+                  disabled={sending || uploadingImage}
+                />
+              )}
 
               <Textarea
                 ref={textareaRef}
@@ -960,7 +1109,7 @@ export function ChatArea({
               />
               <Button
                 onClick={handleSend}
-                disabled={(!input.trim() && !selectedImage) || sending || uploadingImage}
+                disabled={(!input.trim() && !selectedImage) || sending || uploadingImage || uploadingVoice}
                 size="icon"
                 className="w-10 h-10 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 shrink-0"
                 aria-label="Send"
@@ -985,6 +1134,13 @@ export function ChatArea({
         open={imageLimitOpen}
         resetAt={imageLimitResetAt}
         onClose={() => setImageLimitOpen(false)}
+      />
+      {/* Voice limit dialog */}
+      <VoiceLimitDialog
+        open={voiceLimitOpen}
+        resetAt={voiceLimitResetAt}
+        remainingSeconds={voiceLimitRemaining}
+        onClose={() => setVoiceLimitOpen(false)}
       />
     </div>
   );

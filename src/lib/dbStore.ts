@@ -142,7 +142,7 @@ export async function getMessagesFromDB(
     return [];
   }
 
-  // Decrypt each message's content and image key with the vault key before returning
+  // Decrypt each message's content, image key, and voice key with the vault key before returning
   const decrypted = await Promise.all(
     (data ?? []).map(async row => ({
       id: row.id as string,
@@ -168,15 +168,22 @@ export async function getMessagesFromDB(
             imageUrl: (row.reply_to_image_url as string | null) ?? null,
           }
         : null,
+      voiceStoragePath: (row.voice_storage_path as string | null) ?? null,
+      // Decrypt the vault-encrypted AES voice key before returning to the UI
+      voiceKeyBase64: row.voice_key_b64
+        ? await decryptContent(row.voice_key_b64 as string)
+        : null,
+      voiceDuration: (row.voice_duration_seconds as number | null) ?? null,
     }))
   );
   return decrypted;
 }
 
 export async function saveMessageToDB(ownerId: string, message: LocalMessage): Promise<void> {
-  const [encryptedContent, encryptedImageKey] = await Promise.all([
+  const [encryptedContent, encryptedImageKey, encryptedVoiceKey] = await Promise.all([
     encryptContent(message.content),
     message.imageKeyBase64 ? encryptContent(message.imageKeyBase64) : Promise.resolve(null),
+    message.voiceKeyBase64 ? encryptContent(message.voiceKeyBase64) : Promise.resolve(null),
   ]);
   const { error } = await supabase
     .from('messages')
@@ -201,6 +208,10 @@ export async function saveMessageToDB(ownerId: string, message: LocalMessage): P
         reply_to_snippet: message.replyTo?.snippet ?? null,
         reply_to_image_url: message.replyTo?.imageUrl ?? null,
         created_at: new Date(message.timestamp).toISOString(),
+        voice_storage_path: message.voiceStoragePath ?? null,
+        // AES voice key encrypted with vault key — never stored in plaintext
+        voice_key_b64: encryptedVoiceKey,
+        voice_duration_seconds: message.voiceDuration ?? null,
       },
       { onConflict: 'id' }
     );
@@ -217,9 +228,10 @@ export async function saveMessageToDBFull(
   recipientId: string,
   message: LocalMessage
 ): Promise<void> {
-  const [encryptedContent, encryptedImageKey] = await Promise.all([
+  const [encryptedContent, encryptedImageKey, encryptedVoiceKey] = await Promise.all([
     encryptContent(message.content),
     message.imageKeyBase64 ? encryptContent(message.imageKeyBase64) : Promise.resolve(null),
+    message.voiceKeyBase64 ? encryptContent(message.voiceKeyBase64) : Promise.resolve(null),
   ]);
   const { error } = await supabase
     .from('messages')
@@ -242,6 +254,10 @@ export async function saveMessageToDBFull(
         reply_to_snippet: message.replyTo?.snippet ?? null,
         reply_to_image_url: message.replyTo?.imageUrl ?? null,
         created_at: new Date(message.timestamp).toISOString(),
+        voice_storage_path: message.voiceStoragePath ?? null,
+        // AES voice key encrypted with vault key — never stored in plaintext
+        voice_key_b64: encryptedVoiceKey,
+        voice_duration_seconds: message.voiceDuration ?? null,
       },
       { onConflict: 'id' }
     );
@@ -318,11 +334,12 @@ export function subscribeToMessages(
       async (payload) => {
         const row = payload.new as Record<string, unknown>;
         if (row.conversation_id !== conversationId) return;
-        // Decrypt vault-encrypted content and AES image key before surfacing to the UI
-        const content = await decryptContent(row.content as string);
-        const imageKeyBase64 = row.image_key_b64
-          ? await decryptContent(row.image_key_b64 as string)
-          : null;
+        // Decrypt vault-encrypted content, AES image key, and AES voice key before surfacing to UI
+        const [content, imageKeyBase64, voiceKeyBase64] = await Promise.all([
+          decryptContent(row.content as string),
+          row.image_key_b64 ? decryptContent(row.image_key_b64 as string) : Promise.resolve(null),
+          row.voice_key_b64 ? decryptContent(row.voice_key_b64 as string) : Promise.resolve(null),
+        ]);
         onMessage({
           id: row.id as string,
           conversationId: row.conversation_id as string,
@@ -344,6 +361,9 @@ export function subscribeToMessages(
                 imageUrl: (row.reply_to_image_url as string | null) ?? null,
               }
             : null,
+          voiceStoragePath: (row.voice_storage_path as string | null) ?? null,
+          voiceKeyBase64,
+          voiceDuration: (row.voice_duration_seconds as number | null) ?? null,
         });
       }
     )

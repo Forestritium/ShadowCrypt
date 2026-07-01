@@ -31,6 +31,29 @@ export async function getTodayImageCount(userId: string): Promise<number> {
   return (data as number) ?? 0;
 }
 
+// ─── Voice message rate-limit helpers ────────────────────────────────────────
+
+export const VOICE_DAILY_LIMIT_SECONDS = 600; // 10 minutes
+
+/** Returns total voice seconds sent today by the user. */
+export async function getTodayVoiceDuration(userId: string): Promise<number> {
+  const { data, error } = await supabase.rpc('get_voice_send_duration', { p_user_id: userId });
+  if (error) return 0;
+  return (data as number) ?? 0;
+}
+
+/** Thrown when the user has exhausted their 10 minutes/day voice allowance. */
+export class VoiceLimitError extends Error {
+  resetAt: Date;
+  remainingSeconds: number;
+  constructor(resetAt: Date, remainingSeconds: number) {
+    super('Daily voice limit reached');
+    this.name = 'VoiceLimitError';
+    this.resetAt = resetAt;
+    this.remainingSeconds = remainingSeconds;
+  }
+}
+
 /**
  * Upload an image file to Supabase Storage and return its public URL.
  * Throws an ImageLimitError if the user has hit their daily 10-image cap.
@@ -140,6 +163,69 @@ export async function fetchAndDecryptChatImage(
   return URL.createObjectURL(new Blob([plainbuf]));
 }
 
+/**
+ * Upload a voice recording blob to Supabase Storage as AES-256-GCM ciphertext.
+ * The plaintext audio bytes never leave the browser.
+ * Returns the storage path, the base64-encoded decryption key, and the duration.
+ * The key MUST be transmitted inside the Double Ratchet ciphertext — never in cleartext.
+ * Throws VoiceLimitError if the user has hit their daily 10-minute cap.
+ */
+export async function uploadVoiceMessage(
+  userId: string,
+  blob: Blob,
+  durationSeconds: number,
+  mimeType: string
+): Promise<{ storagePath: string; voiceKeyBase64: string; voiceDuration: number }> {
+  // Rate-limit check: read current total before upload
+  const usedSeconds = await getTodayVoiceDuration(userId);
+  if (usedSeconds + durationSeconds > VOICE_DAILY_LIMIT_SECONDS) {
+    const reset = new Date();
+    reset.setUTCHours(24, 0, 0, 0);
+    const remaining = Math.max(0, VOICE_DAILY_LIMIT_SECONDS - usedSeconds);
+    throw new VoiceLimitError(reset, remaining);
+  }
+
+  // Convert blob to File for encryptFileAESGCM (which expects a File)
+  const file = new File([blob], 'voice.webm', { type: mimeType });
+  const { blob: ciphertextBlob, keyBase64 } = await encryptFileAESGCM(file);
+
+  const storagePath = `${userId}/${crypto.randomUUID()}.enc`;
+  const { error: uploadErr } = await supabase.storage
+    .from('chat-voices')
+    .upload(storagePath, ciphertextBlob, { contentType: 'application/octet-stream', upsert: false });
+  if (uploadErr) throw new Error(`Voice upload failed: ${uploadErr.message}`);
+
+  // Atomically increment the duration counter after successful upload
+  await supabase.rpc('increment_voice_send_duration', {
+    p_user_id: userId,
+    p_seconds: durationSeconds,
+  });
+
+  return { storagePath, voiceKeyBase64: keyBase64, voiceDuration: durationSeconds };
+}
+
+/**
+ * Fetch an encrypted voice blob from Supabase Storage via a short-lived signed URL,
+ * decrypt it with the provided AES-256-GCM key, and return an object URL for playback.
+ * The caller is responsible for calling URL.revokeObjectURL() when done.
+ */
+export async function fetchAndDecryptVoiceMessage(
+  storagePath: string,
+  voiceKeyBase64: string
+): Promise<string> {
+  const { data: signedData, error: signErr } = await supabase.storage
+    .from('chat-voices')
+    .createSignedUrl(storagePath, 3600);
+  if (signErr || !signedData?.signedUrl) throw new Error('Failed to create signed URL for voice');
+
+  const response = await fetch(signedData.signedUrl);
+  if (!response.ok) throw new Error(`Failed to fetch encrypted voice: ${response.status}`);
+  const ciphertextBlob = await response.blob();
+
+  const plainbuf = await decryptBlobAESGCM(ciphertextBlob, voiceKeyBase64);
+  return URL.createObjectURL(new Blob([plainbuf], { type: 'audio/webm' }));
+}
+
 // Send an encrypted message to a recipient
 export async function sendEncryptedMessage(
   senderId: string,
@@ -150,7 +236,8 @@ export async function sendEncryptedMessage(
   recipientPublicKey: string,
   messageId?: string,  // caller can pass a stable ID so DB row matches optimistic UI entry
   imageAttachment?: { storagePath: string; imageKeyBase64: string }, // encrypted image metadata
-  replyTo?: import('@/types/types').ReplyTo | null // optional reply context
+  replyTo?: import('@/types/types').ReplyTo | null, // optional reply context
+  voiceAttachment?: { storagePath: string; voiceKeyBase64: string; voiceDuration: number } // encrypted voice metadata
 ): Promise<LocalMessage> {
   // Get or initialize ratchet session
   let session = await getRatchetSession(conversationId);
@@ -202,8 +289,17 @@ export async function sendEncryptedMessage(
   // If there is an image attachment, embed the storage path and AES key INSIDE the
   // ratchet plaintext so they travel encrypted end-to-end and are never visible to
   // the relay operator.  Plain text-only messages stay as a bare string (backward compat).
+  // v:2 = image attachment; v:3 = voice message; both may coexist with text.
   let ratchetPlaintext = plaintext;
-  if (imageAttachment) {
+  if (voiceAttachment) {
+    ratchetPlaintext = JSON.stringify({
+      v: 3,
+      t: plaintext,
+      vsp: voiceAttachment.storagePath,
+      vk: voiceAttachment.voiceKeyBase64,
+      vd: voiceAttachment.voiceDuration,
+    });
+  } else if (imageAttachment) {
     ratchetPlaintext = JSON.stringify({
       v: 2,
       t: plaintext,
@@ -247,6 +343,9 @@ export async function sendEncryptedMessage(
     imageStoragePath: imageAttachment?.storagePath ?? null,
     imageKeyBase64: imageAttachment?.imageKeyBase64 ?? null,
     replyTo: replyTo ?? null,
+    voiceStoragePath: voiceAttachment?.storagePath ?? null,
+    voiceKeyBase64: voiceAttachment?.voiceKeyBase64 ?? null,
+    voiceDuration: voiceAttachment?.voiceDuration ?? null,
   };
 
   // Save sender's copy to DB (persists across logout/login)
@@ -299,17 +398,25 @@ export async function receiveAndDecryptMessage(
     const { plaintext: decrypted, updatedSession } = await ratchetDecrypt(session, envelope);
     await saveRatchetSession(updatedSession);
 
-    // If the decrypted payload is a v2 structured message, extract text and image metadata.
-    // Image storage path and AES key travelled securely inside the ratchet ciphertext.
+    // If the decrypted payload is a v2/v3 structured message, extract text and attachment metadata.
+    // Storage path and AES key travelled securely inside the ratchet ciphertext.
     let content = decrypted;
     let imageStoragePath: string | null = null;
     let imageKeyBase64: string | null = null;
+    let voiceStoragePath: string | null = null;
+    let voiceKeyBase64: string | null = null;
+    let voiceDuration: number | null = null;
     try {
-      const parsed: { v?: number; t?: string; isp?: string; ik?: string } = JSON.parse(decrypted);
+      const parsed: { v?: number; t?: string; isp?: string; ik?: string; vsp?: string; vk?: string; vd?: number } = JSON.parse(decrypted);
       if (parsed.v === 2) {
         content = parsed.t ?? '';
         imageStoragePath = parsed.isp ?? null;
         imageKeyBase64 = parsed.ik ?? null;
+      } else if (parsed.v === 3) {
+        content = parsed.t ?? '';
+        voiceStoragePath = parsed.vsp ?? null;
+        voiceKeyBase64 = parsed.vk ?? null;
+        voiceDuration = parsed.vd ?? null;
       }
     } catch { /* plain-text message — leave content unchanged */ }
 
@@ -329,6 +436,9 @@ export async function receiveAndDecryptMessage(
       imageStoragePath,
       imageKeyBase64,
       replyTo: extras.replyTo ?? null,
+      voiceStoragePath,
+      voiceKeyBase64,
+      voiceDuration,
     };
 
     // Save receiver's copy to DB — owner_id = myUserId (the recipient saving their copy),

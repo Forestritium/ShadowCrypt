@@ -69,6 +69,12 @@ export interface LocalMessage {
   /** Base64-encoded 256-bit AES-GCM key for the encrypted image blob. Travels inside Double Ratchet ciphertext. */
   imageKeyBase64?: string | null;
   replyTo?: ReplyTo | null; // quoted reply context
+  /** Supabase Storage path of the AES-GCM encrypted voice blob (chat-voices bucket). */
+  voiceStoragePath?: string | null;
+  /** Base64-encoded 256-bit AES-GCM key for the encrypted voice blob. Travels inside Double Ratchet ciphertext. */
+  voiceKeyBase64?: string | null;
+  /** Duration of the voice message in seconds, stored alongside ciphertext for UI display. */
+  voiceDuration?: number | null;
 }
 
 // Double Ratchet session state (persisted locally)
