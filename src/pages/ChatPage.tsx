@@ -306,14 +306,18 @@ export default function ChatPage() {
           if (accepted) {
             (async () => {
               try {
-                const pubKey = accepted.receiverPublicKey ?? (await getUserPublicKey(accepted.receiver_id)) ?? '';
-                if (!pubKey) return;
-                const fp = await computeFingerprint(pubKey);
+                // Always fetch the receiver's CURRENT public key from their live profile.
+                // accepted.receiverPublicKey was captured when the outgoing-request list
+                // was loaded and may be stale if the receiver rotated their key in the
+                // meantime — storing the stale key here would cause a fingerprint mismatch.
+                const liveKey = (await getUserPublicKey(accepted.receiver_id)) ?? accepted.receiverPublicKey ?? '';
+                if (!liveKey) return;
+                const fp = await computeFingerprint(liveKey);
                 const convId = makeConversationId(currentUser.id, accepted.receiver_id);
                 await saveContactToDB(currentUser.id, {
                   id: accepted.receiver_id,
                   username: accepted.receiverUsername ?? 'Unknown',
-                  publicKey: pubKey,
+                  publicKey: liveKey,
                   fingerprint: fp,
                   addedAt: Date.now(),
                   conversationId: convId,
@@ -336,7 +340,10 @@ export default function ChatPage() {
     // When a contact's public_key changes (e.g. P-256→X25519 migration via DB
     // trigger), reload contacts so the displayed fingerprint updates live without
     // requiring the user to restart.
-    supabase
+    // Store the channel reference so the cleanup can remove the exact channel
+    // (supabase.channel(name) creates a NEW object each time — calling
+    // .unsubscribe() on a freshly created channel has no effect on the original).
+    const contactsKeyChannel = supabase
       .channel(`contacts-keywatch-${userId}`)
       .on(
         'postgres_changes',
@@ -351,8 +358,7 @@ export default function ChatPage() {
       unsubscribeRequests();
       unsubscribeOutgoing();
 
-      // Unsubscribe from contacts key-change channel
-      supabase.channel(`contacts-keywatch-${userId}`).unsubscribe();
+      supabase.removeChannel(contactsKeyChannel);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]); // only re-subscribe on actual login/logout

@@ -186,17 +186,31 @@ function SidebarContent({
   };
 
   const handleAcceptRequest = async (req: ContactRequest) => {
-    if (!req.senderPublicKey) { toast.error('Sender has no public key.'); return; }
     setHandlingId(req.id);
     try {
       const { error } = await acceptContactRequest(req.id);
       if (error) throw new Error(error);
-      const fp = await computeFingerprint(req.senderPublicKey);
+
+      // Always fetch the sender's CURRENT public key directly from their profile.
+      // req.senderPublicKey is populated when the request list was loaded and may
+      // be stale if the sender rotated their key between sending the request and
+      // its acceptance — using a stale key here would permanently store the wrong
+      // fingerprint for this contact.
+      const { data: senderProfile } = await supabase
+        .from('profiles')
+        .select('public_key')
+        .eq('id', req.sender_id)
+        .maybeSingle();
+
+      const livePublicKey = senderProfile?.public_key ?? req.senderPublicKey;
+      if (!livePublicKey) { toast.error('Sender has no public key.'); return; }
+
+      const fp = await computeFingerprint(livePublicKey);
       const convId = makeConversationId(currentUserId, req.sender_id);
       await saveContactToDB(currentUserId, {
         id: req.sender_id,
         username: req.senderUsername ?? 'Unknown',
-        publicKey: req.senderPublicKey,
+        publicKey: livePublicKey,
         fingerprint: fp,
         addedAt: Date.now(),
         conversationId: convId,

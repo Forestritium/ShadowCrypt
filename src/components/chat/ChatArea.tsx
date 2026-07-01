@@ -808,11 +808,17 @@ export function ChatArea({
                   const showAvatar = !prevMsg || prevMsg.senderId !== msg.senderId;
                   const senderInitial = (msg.senderUsername ?? '?').charAt(0).toUpperCase();
                   // Show the red "New Messages" divider above the first message
-                  // that arrived after the last-seen timestamp.
+                  // that arrived after the last-seen timestamp AND before this
+                  // conversation was opened (i.e. it was waiting, not live).
+                  // Messages that arrive via Realtime while the chat is open have
+                  // timestamp >= conversationOpenedAt.current — excluding them
+                  // prevents a false-positive divider for messages the user is
+                  // actively watching arrive in real time.
                   const showUnreadDivider =
                     !msg.isOwn &&
                     unreadSinceTs !== null &&
                     msg.timestamp > unreadSinceTs &&
+                    msg.timestamp < conversationOpenedAt.current &&
                     (idx === 0 || group.messages[idx - 1].timestamp <= unreadSinceTs);
                   return (
                     <div

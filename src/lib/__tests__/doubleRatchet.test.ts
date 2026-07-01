@@ -428,21 +428,46 @@ describe('computeFingerprint', () => {
     expect(fp).toMatch(/^([0-9A-F]{2}:){7}[0-9A-F]{2}$/);
   });
 
-  it('cross-party consistency: sender and receiver compute the same fingerprint from the same key', async () => {
-    // Simulates: User A generates a key pair; User B fetches A's public_key
-    // from profiles and computes the fingerprint. A computes it locally.
-    // Both must arrive at the same value.
+  it('cross-party consistency: fingerprint survives JSON serialization (DB/sessionStorage round-trip)', async () => {
+    // Simulates the real cross-device scenario:
+    //   Device A: generates key pair → stores publicKeyBase64 in profiles.public_key (a plain JSON string)
+    //   Device B: fetches the same string from the DB → computes fingerprint
+    // Both sides must arrive at the same fingerprint.
+    // JSON.stringify/parse is used because that is how the key travels through
+    // sessionStorage (SessionInfo) and Supabase JSON responses.
     const kpA = generateX25519KeyPair();
+    const fpOnA = await computeFingerprint(kpA.publicKeyBase64);
 
-    // "Sender" side: A computes their own fingerprint from their local key
-    const fpFromSender = await computeFingerprint(kpA.publicKeyBase64);
+    // Simulate JSON serialization as it happens in the DB response / sessionStorage
+    const serialized = JSON.stringify({ publicKey: kpA.publicKeyBase64 });
+    const retrieved = (JSON.parse(serialized) as { publicKey: string }).publicKey;
 
-    // "Receiver" side: B stores the key as it came from the DB (base64 string)
-    // and recomputes the fingerprint — identical input, must produce identical output.
-    const storedPublicKey = kpA.publicKeyBase64; // as it would be stored in profiles/contacts
-    const fpFromReceiver = await computeFingerprint(storedPublicKey);
+    // Verify no mutation occurred during serialization
+    expect(retrieved).toBe(kpA.publicKeyBase64);
 
-    expect(fpFromSender).toBe(fpFromReceiver);
+    const fpOnB = await computeFingerprint(retrieved);
+    expect(fpOnB).toBe(fpOnA);
+  });
+
+  it('recompute from stored contacts row: fingerprint matches original when public_key is present', async () => {
+    // Mirrors the getContactsFromDB path:
+    //   fingerprint: row.public_key ? computeFingerprint(row.public_key) : row.fingerprint
+    // When public_key is present the stored fingerprint column is ignored and
+    // re-derived from the key — this verifies that the recompute path is correct
+    // even if the stored fingerprint column contains a stale value.
+    const kp = generateX25519KeyPair();
+    const staleFingerprint = 'AA:BB:CC:DD:EE:FF:00:11'; // intentionally wrong
+
+    // Simulate a contacts DB row after a key rotation where fingerprint is stale
+    const row = { public_key: kp.publicKeyBase64, fingerprint: staleFingerprint };
+
+    const actual = row.public_key
+      ? await computeFingerprint(row.public_key)
+      : row.fingerprint;
+
+    const expected = await computeFingerprint(kp.publicKeyBase64);
+    expect(actual).toBe(expected);
+    expect(actual).not.toBe(staleFingerprint);
   });
 
   it('x25519PublicKeyFromPrivate round-trips to the same fingerprint', async () => {
