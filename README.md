@@ -22,6 +22,7 @@
 | **At-rest encryption** | All DB columns (text, image keys) vault-wrapped with AES-256-GCM before write |
 | **Key derivation** | Argon2id (64 MB / 3 iter) — resistant to GPU/ASIC brute-force |
 | **Image encryption** | AES-256-GCM per-image key, generated client-side; key travels inside ratchet ciphertext; storage bucket is private, served via signed URLs |
+| **Voice encryption** | AES-256-GCM per-recording key, generated client-side; Opus CVBR audio encoded in WebM container; key travels inside ratchet ciphertext; `chat-voices` bucket is private, served via signed URLs; 10 min/day per-user rate limit |
 | **Identity keys** | X25519 key pair generated in-browser; private key never leaves the device |
 | **Password recovery** | BIP-39 12-word mnemonic (128-bit entropy); only its SHA-256 hash is stored server-side |
 
@@ -50,6 +51,7 @@ ShadowCrypt is an **end-to-end encrypted** messaging app built on a **zero-knowl
 | **Vault Encryption** | All local data (messages, contacts, sessions) encrypted with Argon2id + AES-256-GCM |
 | **Real-time Messaging** | Supabase Realtime relay — ciphertext only, messages deleted after delivery |
 | **Image Sharing** | AES-256-GCM encrypted image upload; key inside ratchet ciphertext; private bucket + signed URLs |
+| **Voice Messages** | AES-256-GCM encrypted voice recording (Opus CVBR / WebM); key inside ratchet ciphertext; private bucket + signed URLs; 10 min/day limit |
 | **Reply & Quote** | Thread-aware reply with quoted message preview |
 | **Contact Requests** | Accept/decline incoming requests; full block list management |
 | **Recovery Phrase** | BIP-39 12-word mnemonic for password reset without email |

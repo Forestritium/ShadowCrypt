@@ -32,6 +32,7 @@ Always run the latest version.
 | **Password reset without email** | BIP-39 mnemonic is verified by SHA-256 hash comparison server-side. The mnemonic itself is never sent to or stored on the server. |
 | **Notification metadata** | Browser notifications are anonymous — they never reveal the sender's identity or message content. |
 | **Encrypted image exposure** | Chat images are AES-256-GCM encrypted before upload. The decryption key travels inside the Double Ratchet ciphertext and is vault-wrapped before DB storage. The storage bucket is private; images are served via short-lived signed URLs only. |
+| **Encrypted voice exposure** | Voice recordings are AES-256-GCM encrypted before upload (Opus CVBR audio in a WebM container). The decryption key travels inside the Double Ratchet ciphertext and is vault-wrapped before DB storage. The `chat-voices` bucket is private; audio blobs are served via short-lived signed URLs only. Plaintext audio bytes never leave the browser. |
 
 ### What ShadowCrypt does NOT protect against
 
@@ -127,4 +128,6 @@ We follow [responsible disclosure](https://cheatsheetseries.owasp.org/cheatsheet
 
 4. **Daily image limit** — The 10 images/day cap is enforced server-side via a Postgres function. It mitigates storage abuse but is not a security boundary.
 
-5. **Self-hosted deployments** — If you self-host ShadowCrypt, you are responsible for securing your Supabase project, applying migrations, and keeping dependencies up to date.
+5. **Daily voice limit** — The 10 minutes/day voice cap is enforced server-side via the `increment_voice_send_duration` RPC and the `voice_send_durations` table. It mitigates storage abuse but is not a security boundary.
+
+6. **Self-hosted deployments** — If you self-host ShadowCrypt, you are responsible for securing your Supabase project, applying migrations, and keeping dependencies up to date.

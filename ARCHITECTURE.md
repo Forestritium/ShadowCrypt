@@ -43,7 +43,8 @@ This document describes the technical architecture of ShadowCrypt, covering the 
                              │  └──────────────────────┘   │
                              │  ┌──────────────────────┐   │
                              │  │  Storage             │   │
-                             │  │  (encrypted images)  │   │
+                             │  │  (encrypted images,  │   │
+                             │  │   encrypted voices)  │   │
                              │  └──────────────────────┘   │
                              │  ┌──────────────────────┐   │
                              │  │  Edge Functions      │   │
@@ -182,6 +183,7 @@ Reset flow:
 | `profiles` | username, public_key, bio, avatar_url, avatar_private, password_version, mnemonic_hash, kdf_version, vault_backup |
 | `contacts` | owner_id → contact_id mapping; denormalised username + public_key for offline access |
 | `messages` | Relay table: encrypted ciphertext routed between users, auto-deleted after 30 days |
+| `voice_send_durations` | Tracks total voice message seconds sent per user per UTC day (10-minute daily cap) |
 | `contact_requests` | Pending/accepted/declined add-contact requests |
 | `blocked_users` | Bidirectional block records |
 
@@ -224,6 +226,39 @@ Supabase Realtime is subscribed to the `messages` table on the `relay` channel (
 12. Recipient: relay.receiveAndDecryptMessage(envelope)
 13.   doubleRatchet.ratchetDecrypt(session, envelope)
 14.   Returns plaintext → stored in local vault + rendered in UI
+```
+
+## Data Flow: Sending a Voice Message
+
+```
+1. User taps mic button → VoiceRecordButton starts MediaRecorder
+   - Codec: Opus (Constrained VBR, 32 kbps ceiling) in WebM container
+   - Chunk interval: 250 ms
+2. User taps stop → MediaRecorder.stop() → Blob (audio/webm)
+3. relay.uploadVoiceMessage(userId, blob, durationSeconds, mimeType)
+4.   Rate-limit check: get_voice_send_duration(userId) → usedSeconds
+     If usedSeconds + durationSeconds > 600 → throw VoiceLimitError
+5.   encryptFileAESGCM(blob) → { ciphertextBlob, keyBase64 }
+     - Generates random 256-bit AES key + 12-byte IV
+     - IV prepended to ciphertext
+6.   supabase.storage.from('chat-voices').upload(path, ciphertextBlob)
+     - Bucket: private, no public access, signed URLs only
+7.   increment_voice_send_duration(userId, durationSeconds)
+8.   Returns { storagePath, voiceKeyBase64, voiceDuration }
+9. relay.sendEncryptedMessage(..., voiceAttachment)
+   - ratchetPlaintext = JSON.stringify({ v:3, t:'', vsp, vk, vd })
+   - Double Ratchet encrypts → voiceKey travels securely in ciphertext
+10. dbStore.saveMessageToDBFull(localMessage)
+    - voiceKeyBase64 vault-wrapped before DB write
+
+Playback (recipient):
+11. Receive ratchet-decrypted { v:3, vsp, vk, vd } payload
+12. VoiceMessageBubble: on first play, fetchAndDecryptVoiceMessage(vsp, vk)
+13.   createSignedUrl(vsp, 3600) → signed URL (1-hour expiry)
+14.   fetch(signedUrl) → ciphertextBlob
+15.   decryptBlobAESGCM(ciphertextBlob, vk) → ArrayBuffer (plaintext audio)
+16.   URL.createObjectURL(new Blob([plainbuf], { type:'audio/webm' }))
+17.   <audio> element plays — plaintext audio never leaves the browser
 ```
 
 ---

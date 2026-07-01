@@ -12,6 +12,7 @@ This guide covers everything you need to know as an end user of ShadowCrypt.
 - [Sending Messages](#sending-messages)
 - [Replying to Messages](#replying-to-messages)
 - [Sharing Images](#sharing-images)
+- [Sending Voice Messages](#sending-voice-messages)
 - [Adding Contacts](#adding-contacts)
 - [Contact Requests](#contact-requests)
 - [Blocking & Unblocking Users](#blocking--unblocking-users)
@@ -96,6 +97,23 @@ All messages are encrypted locally before being sent. The server never sees plai
 3. Preview the selected image, then click **Send**.
 
 > **Daily limit**: Each user can send up to **10 images per day** (resets at midnight UTC).
+
+---
+
+## Sending Voice Messages
+
+1. Click the **microphone** icon in the chat input area to start recording.
+   - A red recording indicator appears with a live elapsed timer.
+2. Click the **stop** (square) button to finish and automatically send the voice message.
+   - Click the **cancel** (mic-off) button to discard the recording without sending.
+
+> **Daily limit**: Each user can record and send up to **10 minutes of voice per day** (resets at midnight UTC). The mic button shows the remaining quota in its tooltip.
+
+**How voice messages are secured:**
+- Your audio is recorded using the Opus codec (Constrained VBR, 32 kbps ceiling) in a WebM container — efficient and private.
+- The recording is encrypted with AES-256-GCM entirely in your browser before upload. The plaintext audio never touches the server.
+- The decryption key travels inside the Double Ratchet ciphertext — the relay and storage service see only opaque encrypted blobs.
+- Audio is stored in a private bucket and accessed via short-lived signed URLs (1-hour expiry).
 
 ---
 

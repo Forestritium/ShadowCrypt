@@ -8,6 +8,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+- **Voice messages** — Record and send end-to-end encrypted voice messages directly in the chat.
+  - Audio encoded with the Opus codec in a WebM container at 32 kbps Constrained VBR (CVBR), providing efficient compression while bounding the bitrate ceiling.
+  - Each recording is encrypted client-side with AES-256-GCM (random 256-bit key + 12-byte IV) before upload; plaintext audio never leaves the browser.
+  - The per-recording AES key is embedded in the Double Ratchet ciphertext (v:3 payload) and vault-wrapped before database storage — the relay and storage layer see only opaque blobs.
+  - Voice blobs stored in a private Supabase Storage bucket (`chat-voices`); served via short-lived signed URLs (1-hour expiry).
+  - Rate limit: **10 minutes of voice per user per day** (resets at midnight UTC), enforced server-side via the `voice_send_durations` table and `increment_voice_send_duration` RPC.
+  - `VoiceRecordButton` component: tap to start/stop recording; displays live elapsed timer and cancel option.
+  - `VoiceMessageBubble` component: inline audio player with play/pause, scrub bar, and duration display; audio decrypted lazily on first play.
+  - `VoiceLimitDialog`: shown when the daily quota is exceeded, with reset time.
+  - New database columns on `messages`: `voice_storage_path`, `voice_key_b64`, `voice_duration_seconds`.
+
 ---
 
 ## [1.0.0] — 2025
