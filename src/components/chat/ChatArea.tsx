@@ -814,7 +814,7 @@ export function ChatArea({
   const isRequestPending = isOutgoingPending || isIncomingPending;
 
   return (
-    <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-background" onContextMenu={captureDeterrenceProps.onContextMenu}>
+    <div className="relative flex-1 flex flex-col min-w-0 overflow-hidden bg-background" onContextMenu={captureDeterrenceProps.onContextMenu}>
 
       {/* ── Capture deterrence overlay ── */}
       {overlayVisible && (

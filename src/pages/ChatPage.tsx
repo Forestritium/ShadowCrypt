@@ -545,7 +545,7 @@ export default function ChatPage() {
         />
       )}
       {/* Main chat area */}
-      <div className="flex-1 min-w-0 flex flex-col pt-14 md:pt-0">
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden pt-14 md:pt-0">
         {/* Desktop sidebar expand button — shown when sidebar is collapsed */}
         {desktopSidebarCollapsed && (
           <></>

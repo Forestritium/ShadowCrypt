@@ -164,24 +164,22 @@ export function VoiceMessageBubble({
           <span className={`text-xs ${timeCls} opacity-70`}>Failed to load audio</span>
         ) : (
           <>
-            {/* Progress track */}
-            <div className={`relative h-1.5 rounded-full ${trackCls} overflow-hidden`}>
+            {/* Progress track + invisible scrubber overlay */}
+            <div className={`relative h-3 flex items-center rounded-full ${trackCls}`}>
               <div
                 className={`absolute inset-y-0 left-0 rounded-full ${fillCls} transition-none`}
                 style={{ width: `${progressPct}%` }}
               />
+              <input
+                type="range"
+                min={0}
+                max={totalSec}
+                value={currentSec}
+                onChange={handleScrub}
+                className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
+                aria-label="Voice message progress"
+              />
             </div>
-            {/* Invisible range input overlay for scrubbing */}
-            <input
-              type="range"
-              min={0}
-              max={totalSec}
-              value={currentSec}
-              onChange={handleScrub}
-              className="absolute opacity-0 w-full h-3 cursor-pointer"
-              aria-label="Voice message progress"
-              style={{ marginTop: '-0.75rem' }}
-            />
           </>
         )}
         {/* Duration */}
