@@ -12,6 +12,10 @@
  *   - MAX_SKIP guard (rejects excessive skipped messages)
  *   - unique ciphertext per message (same plaintext → different ct)
  *   - X25519 key properties (32-byte keys, ECDH symmetry)
+ *   - computeFingerprint determinism and cross-party consistency
+ *   - makeConversationId determinism and symmetry
+ *   - legacy P-256 key rejection
+ *   - replay attack rejection
  */
 
 import { describe, it, expect } from 'vitest';
@@ -21,7 +25,15 @@ import {
   ratchetEncrypt,
   ratchetDecrypt,
 } from '../doubleRatchet';
-import { generateX25519KeyPair, x25519DH, toBase64 } from '../crypto';
+import {
+  generateX25519KeyPair,
+  x25519DH,
+  x25519PublicKeyFromPrivate,
+  computeFingerprint,
+  toBase64,
+  fromBase64,
+} from '../crypto';
+import { makeConversationId } from '../session';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -372,5 +384,132 @@ describe('authentication', () => {
     const tampered = { ...envelope, ciphertext: btoa(String.fromCharCode(...ct)) };
 
     await expect(ratchetDecrypt(bobSession, tampered)).rejects.toThrow();
+  });
+});
+
+// ─── Replay attack ────────────────────────────────────────────────────────────
+
+describe('replay attack rejection', () => {
+  it('rejects re-delivery of the same message (already-consumed message key)', async () => {
+    const { aliceSession, bobSession } = await initPair();
+
+    const { envelope } = await ratchetEncrypt(aliceSession, 'original');
+    // First delivery — should succeed
+    const { updatedSession: bobS1 } = await ratchetDecrypt(bobSession, envelope);
+
+    // Replay the same envelope against the updated session — the message key for
+    // message #0 was already consumed; the ratchet must reject it.
+    await expect(ratchetDecrypt(bobS1, envelope)).rejects.toThrow();
+  });
+});
+
+// ─── computeFingerprint ───────────────────────────────────────────────────────
+
+describe('computeFingerprint', () => {
+  it('is deterministic: same key always produces the same fingerprint', async () => {
+    const kp = generateX25519KeyPair();
+    const fp1 = await computeFingerprint(kp.publicKeyBase64);
+    const fp2 = await computeFingerprint(kp.publicKeyBase64);
+    expect(fp1).toBe(fp2);
+  });
+
+  it('produces different fingerprints for different keys', async () => {
+    const kp1 = generateX25519KeyPair();
+    const kp2 = generateX25519KeyPair();
+    const fp1 = await computeFingerprint(kp1.publicKeyBase64);
+    const fp2 = await computeFingerprint(kp2.publicKeyBase64);
+    expect(fp1).not.toBe(fp2);
+  });
+
+  it('returns 8 colon-separated uppercase hex pairs (XX:XX:…)', async () => {
+    const kp = generateX25519KeyPair();
+    const fp = await computeFingerprint(kp.publicKeyBase64);
+    // Format: "AB:CD:EF:01:23:45:67:89" — 8 groups of 2 uppercase hex chars
+    expect(fp).toMatch(/^([0-9A-F]{2}:){7}[0-9A-F]{2}$/);
+  });
+
+  it('cross-party consistency: sender and receiver compute the same fingerprint from the same key', async () => {
+    // Simulates: User A generates a key pair; User B fetches A's public_key
+    // from profiles and computes the fingerprint. A computes it locally.
+    // Both must arrive at the same value.
+    const kpA = generateX25519KeyPair();
+
+    // "Sender" side: A computes their own fingerprint from their local key
+    const fpFromSender = await computeFingerprint(kpA.publicKeyBase64);
+
+    // "Receiver" side: B stores the key as it came from the DB (base64 string)
+    // and recomputes the fingerprint — identical input, must produce identical output.
+    const storedPublicKey = kpA.publicKeyBase64; // as it would be stored in profiles/contacts
+    const fpFromReceiver = await computeFingerprint(storedPublicKey);
+
+    expect(fpFromSender).toBe(fpFromReceiver);
+  });
+
+  it('x25519PublicKeyFromPrivate round-trips to the same fingerprint', async () => {
+    const kp = generateX25519KeyPair();
+    // Derive public key separately from the private key (as session.ts does)
+    const rederived = x25519PublicKeyFromPrivate(kp.privateKeyBase64);
+    expect(rederived).toBe(kp.publicKeyBase64);
+    const fp1 = await computeFingerprint(kp.publicKeyBase64);
+    const fp2 = await computeFingerprint(rederived);
+    expect(fp1).toBe(fp2);
+  });
+});
+
+// ─── makeConversationId ───────────────────────────────────────────────────────
+
+describe('makeConversationId', () => {
+  it('is deterministic: same two IDs always produce the same conversation ID', () => {
+    const id1 = 'user-aaa';
+    const id2 = 'user-bbb';
+    expect(makeConversationId(id1, id2)).toBe(makeConversationId(id1, id2));
+  });
+
+  it('is symmetric: order of arguments does not matter', () => {
+    const id1 = 'user-aaa';
+    const id2 = 'user-bbb';
+    expect(makeConversationId(id1, id2)).toBe(makeConversationId(id2, id1));
+  });
+
+  it('produces different IDs for different user pairs', () => {
+    const a = 'user-aaa';
+    const b = 'user-bbb';
+    const c = 'user-ccc';
+    expect(makeConversationId(a, b)).not.toBe(makeConversationId(a, c));
+  });
+
+  it('returns a non-empty base64 string', () => {
+    const id = makeConversationId('user-x', 'user-y');
+    expect(id.length).toBeGreaterThan(0);
+    // base64 alphabet only (standard, with optional padding)
+    expect(id).toMatch(/^[A-Za-z0-9+/]+=*$/);
+    // Must be decodable back to a UTF-8 string containing both IDs
+    const decoded = new TextDecoder().decode(fromBase64(id));
+    expect(decoded).toContain('user-x');
+    expect(decoded).toContain('user-y');
+  });
+});
+
+// ─── Legacy P-256 key rejection ───────────────────────────────────────────────
+
+describe('legacy P-256 key rejection', () => {
+  it('x25519DH throws LEGACY_KEY_FORMAT for a 65-byte uncompressed P-256 key', () => {
+    const { privateKeyBase64 } = generateX25519KeyPair();
+    // Simulate an old uncompressed P-256 public key: 0x04 || 32-byte X || 32-byte Y = 65 bytes
+    const fakeP256Pub = new Uint8Array(65);
+    fakeP256Pub[0] = 0x04;
+    crypto.getRandomValues(fakeP256Pub.subarray(1));
+    const legacyPubB64 = toBase64(fakeP256Pub);
+
+    expect(() => x25519DH(privateKeyBase64, legacyPubB64)).toThrow('LEGACY_KEY_FORMAT');
+  });
+
+  it('x25519DH succeeds for a valid 32-byte X25519 key', () => {
+    const kp1 = generateX25519KeyPair();
+    const kp2 = generateX25519KeyPair();
+    // Should not throw
+    expect(() => x25519DH(kp1.privateKeyBase64, kp2.publicKeyBase64)).not.toThrow();
+    const secret = x25519DH(kp1.privateKeyBase64, kp2.publicKeyBase64);
+    expect(secret).toHaveLength(32);
   });
 });

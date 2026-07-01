@@ -281,16 +281,19 @@ export async function deleteConversationMessagesForBoth(
 }
 
 /**
- * Update the stored public key for a contact (self-healing for legacy P-256 → X25519 migration).
+ * Update the stored public key AND recomputed fingerprint for a contact.
+ * Keeping both columns consistent prevents a stale fingerprint from being
+ * served via the fallback path in getContactsFromDB (when public_key is null).
  */
 export async function updateContactPublicKey(
   ownerId: string,
   contactId: string,
   newPublicKey: string
 ): Promise<void> {
+  const newFingerprint = await computeFingerprint(newPublicKey);
   const { error } = await supabase
     .from('contacts')
-    .update({ public_key: newPublicKey })
+    .update({ public_key: newPublicKey, fingerprint: newFingerprint })
     .eq('owner_id', ownerId)
     .eq('contact_id', contactId);
   if (error) console.error('[dbStore] updateContactPublicKey error:', error.message);

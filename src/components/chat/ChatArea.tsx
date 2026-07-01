@@ -438,6 +438,7 @@ export function ChatArea({
   // Subscribe to Realtime messages for instant delivery
   useEffect(() => {
     if (!conversation) return;
+    const lastSeenKey = `sc_last_seen:${conversation.id}`;
     const unsub = subscribeToMessages(currentUserId, conversation.id, (msg) => {
       setMessages(prev => {
         const existing = prev.find(m => m.id === msg.id);
@@ -455,6 +456,13 @@ export function ChatArea({
         }
         return [...prev, msg];
       });
+      // Mark this message as seen immediately — the user is actively viewing this
+      // conversation, so update sc_last_seen so it won't appear as "New Messages"
+      // on the next visit.
+      const stored = parseInt(localStorage.getItem(lastSeenKey) ?? '0', 10) || 0;
+      if (msg.timestamp > stored) {
+        localStorage.setItem(lastSeenKey, String(msg.timestamp));
+      }
       setRemoteTyping(false);
     });
     return unsub;
