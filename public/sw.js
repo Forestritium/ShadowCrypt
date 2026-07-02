@@ -3,7 +3,7 @@
 // No caching is intentional — all message data is encrypted and stored in
 // IndexedDB by the app; serving stale assets could expose outdated crypto code.
 
-const SW_VERSION = 'v1';
+const SW_VERSION = 'v2'; // bumped to force re-activation after progressier SW removal
 
 self.addEventListener('install', (event) => {
   // Skip waiting so the new SW activates immediately
