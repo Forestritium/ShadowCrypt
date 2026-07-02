@@ -4,9 +4,8 @@ import App from "./App.tsx";
 import { AppWrapper } from "./components/common/PageMeta.tsx";
 
 // Service worker lifecycle management
-// Step 1: Unregister any stale/third-party SWs (e.g. previously installed
-//         Progressier SW) before registering our own.  This runs on every
-//         page load so migrating users get cleaned up automatically.
+// Unregister any stale third-party SWs before registering our own.
+// This runs on every page load so migrating users get cleaned up automatically.
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
     // Purge every SW whose script URL is not our own /sw.js
