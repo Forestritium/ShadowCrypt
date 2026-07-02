@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from 'sonner';
 import {
   Shield, Lock, Key, Send, MessageSquare,
-  AlertCircle, Info, Clock, ArrowLeft, ImageIcon, X, Reply, Bell, BellOff,
+  AlertCircle, Info, Clock, ArrowLeft, ImageIcon, X, Reply, Bell, BellOff, Paperclip,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -18,12 +18,14 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import type { ConversationPreview, LocalMessage, Contact, ContactRequest, ReplyTo } from '@/types/types';
+import type { ConversationPreview, LocalMessage, Contact, ContactRequest, ReplyTo, MessageReaction } from '@/types/types';
 import { getMessagesFromDB, subscribeToMessages } from '@/lib/dbStore';
 import {
   sendEncryptedMessage,
   uploadChatImage, ImageLimitError, getTodayImageCount, fetchAndDecryptChatImage,
   uploadVoiceMessage, VoiceLimitError, getTodayVoiceDuration,
+  uploadChatFile, FileLimitError, getTodayFileBytes, FILE_DAILY_LIMIT_BYTES,
+  addReaction, removeReaction, fetchReactionsForConversation, subscribeToReactions,
 } from '@/lib/relay';
 import { broadcastTyping, subscribeToTyping } from '@/lib/relay';
 import { supabase } from '@/db/supabase';
@@ -31,6 +33,10 @@ import { ReplyPreviewBar } from './ReplyPreviewBar';
 import { QuotedMessage } from './QuotedMessage';
 import { VoiceRecordButton } from './VoiceRecordButton';
 import { VoiceMessageBubble } from './VoiceMessageBubble';
+import { FileAttachmentButton } from './FileAttachmentButton';
+import { FileAttachmentBubble } from './FileAttachmentBubble';
+import { ReactionBar } from './ReactionBar';
+import { EmojiReactionPicker } from './EmojiReactionPicker';
 import { playNotificationSound, unlockAudio, isMuted, setMuted, isDND } from '@/lib/notificationSound';
 import { useCaptureDeterrence } from '@/hooks/use-capture-deterrence';
 import { VOICE_DAILY_LIMIT_SECONDS } from '@/lib/voiceRecorder';
@@ -71,9 +77,11 @@ interface MessageBubbleProps {
   onReply: (msg: LocalMessage) => void;
   onScrollTo: (id: string) => void;
   decryptedImageUrl?: string | null;
+  onReact: (msg: LocalMessage, emoji: string, alreadyReacted?: boolean) => void;
+  currentUserId: string;
 }
 
-function MessageBubble({ message, isSelf, showAvatar, senderInitial, onReply, onScrollTo, decryptedImageUrl }: MessageBubbleProps) {
+function MessageBubble({ message, isSelf, showAvatar, senderInitial, onReply, onScrollTo, decryptedImageUrl, onReact, currentUserId }: MessageBubbleProps) {
   const [imgOpen, setImgOpen] = useState(false);
   const [showReplyBtn, setShowReplyBtn] = useState(false);
   // Swipe-right to reply (touch)
@@ -128,6 +136,13 @@ function MessageBubble({ message, isSelf, showAvatar, senderInitial, onReply, on
       >
         <Reply className="w-3.5 h-3.5" />
       </button>
+
+      {/* Emoji reaction picker — visible on hover */}
+      <div className={`shrink-0 self-center transition-all duration-150 ${
+        showReplyBtn ? 'opacity-100 scale-100' : 'opacity-0 scale-75 pointer-events-none'
+      } ${isSelf ? 'order-last' : 'order-first'}`}>
+        <EmojiReactionPicker onSelect={emoji => onReact(message, emoji)} />
+      </div>
 
       <div className={`min-w-0 max-w-[75%] flex flex-col gap-0.5 ${isSelf ? 'items-end' : 'items-start'}`}>
         <div className={`px-3 py-2 rounded-2xl text-sm leading-relaxed ${
@@ -220,10 +235,30 @@ function MessageBubble({ message, isSelf, showAvatar, senderInitial, onReply, on
               isSelf={isSelf}
             />
           )}
+          {/* File attachment — decrypt + download on click */}
+          {message.fileStoragePath && message.fileKeyBase64 && message.fileName && (
+            <FileAttachmentBubble
+              storagePath={message.fileStoragePath}
+              fileKey={message.fileKeyBase64}
+              fileName={message.fileName}
+              fileSize={message.fileSize ?? 0}
+              mimeType={message.fileMimeType ?? 'application/octet-stream'}
+              isSelf={isSelf}
+            />
+          )}
           {message.content && (
             <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{message.content}</p>
           )}
         </div>
+
+        {/* Reaction bar — shown below the bubble */}
+        {(message.reactions ?? []).length > 0 && (
+          <ReactionBar
+            reactions={message.reactions!}
+            currentUserId={currentUserId}
+            onToggle={(emoji, alreadyReacted) => onReact(message, emoji, alreadyReacted)}
+          />
+        )}
 
         <div className={`flex items-center gap-1 px-1 ${isSelf ? 'flex-row-reverse' : 'flex-row'}`}>
           <span className="text-xs text-muted-foreground tabular-nums">{formatTime(message.timestamp)}</span>
@@ -347,6 +382,15 @@ export function ChatArea({
   const [voiceLimitOpen, setVoiceLimitOpen] = useState(false);
   const [voiceLimitResetAt, setVoiceLimitResetAt] = useState<Date | null>(null);
   const [voiceLimitRemaining, setVoiceLimitRemaining] = useState(0);
+  // File attachment state
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [fileLimitOpen, setFileLimitOpen] = useState(false);
+  const [fileLimitResetAt, setFileLimitResetAt] = useState<Date | null>(null);
+  const [fileLimitRemaining, setFileLimitRemaining] = useState(0);
+  const [todayFileBytes, setTodayFileBytes] = useState(0);
+  // Reactions state: messageId → MessageReaction[]
+  const [reactions, setReactions] = useState<Record<string, MessageReaction[]>>({});
   // Unread divider: timestamp of the last message seen before this session opened
   const [unreadSinceTs, setUnreadSinceTs] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -583,10 +627,42 @@ export function ChatArea({
     getTodayVoiceDuration(currentUserId).then(setTodayVoiceSeconds).catch(() => {});
   }, [currentUserId, conversation?.id]);
 
+  // Load today's file bytes when conversation changes
+  useEffect(() => {
+    if (!currentUserId) return;
+    getTodayFileBytes(currentUserId).then(setTodayFileBytes).catch(() => {});
+  }, [currentUserId, conversation?.id]);
+
+  // Load reactions for the current conversation; subscribe to live updates
+  useEffect(() => {
+    if (!conversation) { setReactions({}); return; }
+    fetchReactionsForConversation(conversation.id).then(map => {
+      const obj: Record<string, MessageReaction[]> = {};
+      map.forEach((v, k) => { obj[k] = v; });
+      setReactions(obj);
+    }).catch(() => {});
+
+    const unsub = subscribeToReactions(
+      conversation.id,
+      (reaction) => {
+        setReactions(prev => ({
+          ...prev,
+          [reaction.messageId]: [...(prev[reaction.messageId] ?? []), reaction],
+        }));
+      },
+      (reactionId, messageId) => {
+        setReactions(prev => ({
+          ...prev,
+          [messageId]: (prev[messageId] ?? []).filter(r => r.id !== reactionId),
+        }));
+      }
+    );
+    return unsub;
+  }, [conversation?.id]);
+
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    // Reset input so same file can be re-selected
     e.target.value = '';
     if (todayImageCount >= IMAGE_DAILY_LIMIT) {
       const reset = new Date();
@@ -608,6 +684,127 @@ export function ChatArea({
     if (imagePreview) { URL.revokeObjectURL(imagePreview); }
     setImagePreview(null);
   };
+
+  /** Called by FileAttachmentButton when a file is selected. */
+  const handleFileSelected = useCallback(async (file: File) => {
+    if (!conversation || uploadingFile) return;
+    const contact = contacts.find(c => c.id === conversation.contact?.id);
+    if (!contact) { toast.error('Contact not found.'); return; }
+
+    // Pre-check quota client-side for fast feedback
+    if (todayFileBytes + file.size > FILE_DAILY_LIMIT_BYTES) {
+      const reset = new Date();
+      reset.setUTCHours(24, 0, 0, 0);
+      setFileLimitResetAt(reset);
+      setFileLimitRemaining(Math.max(0, FILE_DAILY_LIMIT_BYTES - todayFileBytes));
+      setFileLimitOpen(true);
+      return;
+    }
+
+    setSelectedFile(file);
+    const tempId = crypto.randomUUID();
+    setUploadingFile(true);
+
+    let fileAttachment: { storagePath: string; fileKeyBase64: string; fileName: string; fileSize: number; fileMimeType: string } | undefined;
+    try {
+      fileAttachment = await uploadChatFile(currentUserId, file);
+      setTodayFileBytes(b => b + file.size);
+    } catch (err) {
+      if (err instanceof FileLimitError) {
+        setFileLimitResetAt(err.resetAt);
+        setFileLimitRemaining(err.remainingBytes);
+        setFileLimitOpen(true);
+      } else {
+        toast.error('File upload failed. Please try again.');
+      }
+      setUploadingFile(false);
+      setSelectedFile(null);
+      return;
+    }
+    setUploadingFile(false);
+    setSelectedFile(null);
+
+    const optimistic: LocalMessage = {
+      id: tempId,
+      conversationId: conversation.id,
+      senderId: currentUserId,
+      senderUsername: currentUsername,
+      content: '',
+      timestamp: Date.now(),
+      status: 'sent',
+      isOwn: true,
+      imageUrl: null,
+      imageStoragePath: null,
+      imageKeyBase64: null,
+      replyTo: null,
+      voiceStoragePath: null,
+      voiceKeyBase64: null,
+      voiceDuration: null,
+      fileStoragePath: fileAttachment.storagePath,
+      fileKeyBase64: fileAttachment.fileKeyBase64,
+      fileName: fileAttachment.fileName,
+      fileSize: fileAttachment.fileSize,
+      fileMimeType: fileAttachment.fileMimeType,
+    };
+    setMessages(prev => [...prev, optimistic]);
+
+    try {
+      await sendEncryptedMessage(
+        currentUserId, currentUsername, contact.id,
+        conversation.id, '', contact.publicKey, tempId,
+        undefined, null, undefined, fileAttachment
+      );
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'delivered' } : m));
+      onMessageSent();
+    } catch (err) {
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'failed' } : m));
+      const msg = (err as Error).message ?? '';
+      if (msg.startsWith('LEGACY_KEY_FORMAT')) {
+        toast.error('Cannot send file', {
+          description: `@${contact.username} needs to re-login to update their encryption key.`,
+        });
+      } else {
+        toast.error('Failed to send file. Please try again.');
+      }
+      console.error('[ShadowCrypt] File send error:', err);
+    }
+  }, [conversation, contacts, currentUserId, currentUsername, uploadingFile, todayFileBytes, onMessageSent]);
+
+  /** Toggle (add or remove) an emoji reaction on a message. */
+  const handleReact = useCallback(async (msg: LocalMessage, emoji: string, alreadyReacted?: boolean) => {
+    if (!conversation) return;
+    const contact = contacts.find(c => c.id === conversation.contact?.id);
+    if (!contact) return;
+
+    // Determine whether the current user already has this exact reaction
+    const existingReaction = (reactions[msg.id] ?? [])
+      .find(r => r.senderId === currentUserId && r.emoji === emoji);
+    const shouldRemove = alreadyReacted ?? !!existingReaction;
+
+    // Optimistic update
+    if (shouldRemove) {
+      setReactions(prev => ({
+        ...prev,
+        [msg.id]: (prev[msg.id] ?? []).filter(
+          r => !(r.senderId === currentUserId && r.emoji === emoji)
+        ),
+      }));
+      await removeReaction(msg.id, currentUserId, emoji);
+    } else {
+      const optimisticReaction: MessageReaction = {
+        id: crypto.randomUUID(),
+        messageId: msg.id,
+        senderId: currentUserId,
+        emoji,
+        createdAt: Date.now(),
+      };
+      setReactions(prev => ({
+        ...prev,
+        [msg.id]: [...(prev[msg.id] ?? []), optimisticReaction],
+      }));
+      await addReaction(msg.id, conversation.id, currentUserId, contact.id, emoji);
+    }
+  }, [conversation, contacts, currentUserId, reactions]);
 
   const handleSend = async () => {
     const text = input.trim();
@@ -638,7 +835,6 @@ export function ChatArea({
       setUploadingImage(false);
     }
 
-    // Capture and clear reply context before sending
     const currentReply = replyingTo;
     setSending(true);
     const optimistic: LocalMessage = {
@@ -657,6 +853,11 @@ export function ChatArea({
       voiceStoragePath: null,
       voiceKeyBase64: null,
       voiceDuration: null,
+      fileStoragePath: null,
+      fileKeyBase64: null,
+      fileName: null,
+      fileSize: null,
+      fileMimeType: null,
     };
     setMessages(prev => [...prev, optimistic]);
     setInput('');
@@ -713,7 +914,6 @@ export function ChatArea({
     }
     setUploadingVoice(false);
 
-    // Add optimistic voice message
     const optimistic: LocalMessage = {
       id: tempId,
       conversationId: conversation.id,
@@ -730,6 +930,11 @@ export function ChatArea({
       voiceStoragePath: voiceAttachment.storagePath,
       voiceKeyBase64: voiceAttachment.voiceKeyBase64,
       voiceDuration: voiceAttachment.voiceDuration,
+      fileStoragePath: null,
+      fileKeyBase64: null,
+      fileName: null,
+      fileSize: null,
+      fileMimeType: null,
     };
     setMessages(prev => [...prev, optimistic]);
 
@@ -762,12 +967,16 @@ export function ChatArea({
     }
   };
 
-  // Group messages by date
+  // Group messages by date, and attach live reactions to each message
   const groupedMessages = messages.reduce<{ date: string; messages: LocalMessage[] }[]>((acc, msg) => {
+    const msgWithReactions: LocalMessage = {
+      ...msg,
+      reactions: reactions[msg.id] ?? [],
+    };
     const date = formatDate(msg.timestamp);
     const last = acc[acc.length - 1];
-    if (last && last.date === date) last.messages.push(msg);
-    else acc.push({ date, messages: [msg] });
+    if (last && last.date === date) last.messages.push(msgWithReactions);
+    else acc.push({ date, messages: [msgWithReactions] });
     return acc;
   }, []);
 
@@ -982,6 +1191,8 @@ export function ChatArea({
                         onReply={handleReply}
                         onScrollTo={scrollToMessage}
                         decryptedImageUrl={decryptedImages[msg.id] ?? null}
+                        onReact={handleReact}
+                        currentUserId={currentUserId}
                       />
                     </div>
                   );
@@ -1061,8 +1272,21 @@ export function ChatArea({
               </div>
             )}
 
+            {/* File preview strip */}
+            {selectedFile && (
+              <div className="flex items-center gap-2 bg-muted/60 border border-border rounded-xl px-3 py-2">
+                <Paperclip className="w-4 h-4 text-primary shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-foreground truncate">{selectedFile.name}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {(selectedFile.size / (1024 * 1024)).toFixed(1)} MB · Encrypting…
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div className="flex items-end gap-2">
-              {/* Hidden file input */}
+              {/* Hidden file input for images */}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -1075,7 +1299,7 @@ export function ChatArea({
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={uploadingImage || sending || uploadingVoice}
+                disabled={uploadingImage || sending || uploadingVoice || uploadingFile}
                 className="w-10 h-10 rounded-xl flex items-center justify-center text-muted-foreground hover:text-primary hover:bg-muted transition-colors shrink-0 disabled:opacity-40"
                 aria-label="Attach image"
                 title={`Attach image (${IMAGE_DAILY_LIMIT - todayImageCount}/${IMAGE_DAILY_LIMIT} remaining today)`}
@@ -1085,6 +1309,13 @@ export function ChatArea({
                   : <ImageIcon className="w-5 h-5" />
                 }
               </button>
+              {/* File attach button */}
+              <FileAttachmentButton
+                onFileSelected={handleFileSelected}
+                disabled={sending || uploadingImage || uploadingVoice}
+                uploading={uploadingFile}
+                remainingBytes={Math.max(0, FILE_DAILY_LIMIT_BYTES - todayFileBytes)}
+              />
               {/* Voice record button */}
               {uploadingVoice ? (
                 <div className="w-10 h-10 flex items-center justify-center shrink-0">
@@ -1094,7 +1325,7 @@ export function ChatArea({
                 <VoiceRecordButton
                   onRecordingComplete={handleVoiceRecorded}
                   usedSecondsToday={todayVoiceSeconds}
-                  disabled={sending || uploadingImage}
+                  disabled={sending || uploadingImage || uploadingFile}
                 />
               )}
 
@@ -1109,7 +1340,7 @@ export function ChatArea({
               />
               <Button
                 onClick={handleSend}
-                disabled={(!input.trim() && !selectedImage) || sending || uploadingImage || uploadingVoice}
+                disabled={(!input.trim() && !selectedImage) || sending || uploadingImage || uploadingVoice || uploadingFile}
                 size="icon"
                 className="w-10 h-10 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 shrink-0"
                 aria-label="Send"
@@ -1142,6 +1373,36 @@ export function ChatArea({
         remainingSeconds={voiceLimitRemaining}
         onClose={() => setVoiceLimitOpen(false)}
       />
+      {/* File limit dialog */}
+      <Dialog open={fileLimitOpen} onOpenChange={setFileLimitOpen}>
+        <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-sm bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-foreground">
+              <Paperclip className="w-5 h-5 text-primary" />
+              Daily File Limit Reached
+            </DialogTitle>
+            <DialogDescription className="text-muted-foreground text-pretty">
+              You can upload up to <strong>60 MB of files per day</strong> to keep the service running smoothly.
+              {fileLimitRemaining > 0 && (
+                <> Only <strong>{(fileLimitRemaining / (1024 * 1024)).toFixed(1)} MB</strong> remaining today.</>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          {fileLimitResetAt && (
+            <div className="flex items-center gap-2 bg-primary/5 border border-primary/20 rounded-lg px-3 py-2.5 text-sm">
+              <Clock className="w-4 h-4 text-primary shrink-0" />
+              <span className="text-foreground">
+                Your limit resets today at <strong>
+                  {fileLimitResetAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
+                </strong> (midnight UTC).
+              </span>
+            </div>
+          )}
+          <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setFileLimitOpen(false)}>
+            Got it
+          </Button>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

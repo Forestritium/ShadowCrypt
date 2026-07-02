@@ -174,16 +174,25 @@ export async function getMessagesFromDB(
         ? await decryptContent(row.voice_key_b64 as string)
         : null,
       voiceDuration: (row.voice_duration_seconds as number | null) ?? null,
+      fileStoragePath: (row.file_storage_path as string | null) ?? null,
+      // Decrypt the vault-encrypted AES file key before returning to the UI
+      fileKeyBase64: row.file_key_b64
+        ? await decryptContent(row.file_key_b64 as string)
+        : null,
+      fileName: (row.file_name as string | null) ?? null,
+      fileSize: (row.file_size as number | null) ?? null,
+      fileMimeType: (row.file_mime_type as string | null) ?? null,
     }))
   );
   return decrypted;
 }
 
 export async function saveMessageToDB(ownerId: string, message: LocalMessage): Promise<void> {
-  const [encryptedContent, encryptedImageKey, encryptedVoiceKey] = await Promise.all([
+  const [encryptedContent, encryptedImageKey, encryptedVoiceKey, encryptedFileKey] = await Promise.all([
     encryptContent(message.content),
     message.imageKeyBase64 ? encryptContent(message.imageKeyBase64) : Promise.resolve(null),
     message.voiceKeyBase64 ? encryptContent(message.voiceKeyBase64) : Promise.resolve(null),
+    message.fileKeyBase64 ? encryptContent(message.fileKeyBase64) : Promise.resolve(null),
   ]);
   const { error } = await supabase
     .from('messages')
@@ -201,7 +210,6 @@ export async function saveMessageToDB(ownerId: string, message: LocalMessage): P
         is_own: message.isOwn,
         image_url: message.imageUrl ?? null,
         image_storage_path: message.imageStoragePath ?? null,
-        // AES image key encrypted with vault key — never stored in plaintext
         image_key_b64: encryptedImageKey,
         reply_to_id: message.replyTo?.id ?? null,
         reply_to_sender: message.replyTo?.senderUsername ?? null,
@@ -209,9 +217,13 @@ export async function saveMessageToDB(ownerId: string, message: LocalMessage): P
         reply_to_image_url: message.replyTo?.imageUrl ?? null,
         created_at: new Date(message.timestamp).toISOString(),
         voice_storage_path: message.voiceStoragePath ?? null,
-        // AES voice key encrypted with vault key — never stored in plaintext
         voice_key_b64: encryptedVoiceKey,
         voice_duration_seconds: message.voiceDuration ?? null,
+        file_storage_path: message.fileStoragePath ?? null,
+        file_key_b64: encryptedFileKey,
+        file_name: message.fileName ?? null,
+        file_size: message.fileSize ?? null,
+        file_mime_type: message.fileMimeType ?? null,
       },
       { onConflict: 'id' }
     );
@@ -228,10 +240,11 @@ export async function saveMessageToDBFull(
   recipientId: string,
   message: LocalMessage
 ): Promise<void> {
-  const [encryptedContent, encryptedImageKey, encryptedVoiceKey] = await Promise.all([
+  const [encryptedContent, encryptedImageKey, encryptedVoiceKey, encryptedFileKey] = await Promise.all([
     encryptContent(message.content),
     message.imageKeyBase64 ? encryptContent(message.imageKeyBase64) : Promise.resolve(null),
     message.voiceKeyBase64 ? encryptContent(message.voiceKeyBase64) : Promise.resolve(null),
+    message.fileKeyBase64 ? encryptContent(message.fileKeyBase64) : Promise.resolve(null),
   ]);
   const { error } = await supabase
     .from('messages')
@@ -258,6 +271,12 @@ export async function saveMessageToDBFull(
         // AES voice key encrypted with vault key — never stored in plaintext
         voice_key_b64: encryptedVoiceKey,
         voice_duration_seconds: message.voiceDuration ?? null,
+        file_storage_path: message.fileStoragePath ?? null,
+        // AES file key encrypted with vault key — never stored in plaintext
+        file_key_b64: encryptedFileKey,
+        file_name: message.fileName ?? null,
+        file_size: message.fileSize ?? null,
+        file_mime_type: message.fileMimeType ?? null,
       },
       { onConflict: 'id' }
     );
@@ -335,10 +354,11 @@ export function subscribeToMessages(
         const row = payload.new as Record<string, unknown>;
         if (row.conversation_id !== conversationId) return;
         // Decrypt vault-encrypted content, AES image key, and AES voice key before surfacing to UI
-        const [content, imageKeyBase64, voiceKeyBase64] = await Promise.all([
+        const [content, imageKeyBase64, voiceKeyBase64, fileKeyBase64] = await Promise.all([
           decryptContent(row.content as string),
           row.image_key_b64 ? decryptContent(row.image_key_b64 as string) : Promise.resolve(null),
           row.voice_key_b64 ? decryptContent(row.voice_key_b64 as string) : Promise.resolve(null),
+          row.file_key_b64 ? decryptContent(row.file_key_b64 as string) : Promise.resolve(null),
         ]);
         onMessage({
           id: row.id as string,
@@ -364,6 +384,11 @@ export function subscribeToMessages(
           voiceStoragePath: (row.voice_storage_path as string | null) ?? null,
           voiceKeyBase64,
           voiceDuration: (row.voice_duration_seconds as number | null) ?? null,
+          fileStoragePath: (row.file_storage_path as string | null) ?? null,
+          fileKeyBase64,
+          fileName: (row.file_name as string | null) ?? null,
+          fileSize: (row.file_size as number | null) ?? null,
+          fileMimeType: (row.file_mime_type as string | null) ?? null,
         });
       }
     )

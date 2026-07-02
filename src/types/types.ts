@@ -53,6 +53,16 @@ export interface ReplyTo {
   imageUrl?: string | null; // thumbnail if the original was an image message
 }
 
+/** A single emoji reaction on a message. */
+export interface MessageReaction {
+  id: string;
+  messageId: string;
+  senderId: string;
+  senderUsername?: string;
+  emoji: string;
+  createdAt: number;
+}
+
 export interface LocalMessage {
   id: string;
   conversationId: string;
@@ -75,6 +85,18 @@ export interface LocalMessage {
   voiceKeyBase64?: string | null;
   /** Duration of the voice message in seconds, stored alongside ciphertext for UI display. */
   voiceDuration?: number | null;
+  /** Supabase Storage path of the AES-GCM encrypted file blob (chat-files bucket). */
+  fileStoragePath?: string | null;
+  /** Base64-encoded 256-bit AES-GCM key for the encrypted file blob. Travels inside Double Ratchet ciphertext. */
+  fileKeyBase64?: string | null;
+  /** Original filename shown in the UI (e.g. "report.pdf"). */
+  fileName?: string | null;
+  /** File size in bytes, for display purposes. */
+  fileSize?: number | null;
+  /** MIME type (e.g. "application/pdf") for icon selection and download hint. */
+  fileMimeType?: string | null;
+  /** Live emoji reactions on this message — populated from message_reactions table. */
+  reactions?: MessageReaction[];
 }
 
 // Double Ratchet session state (persisted locally)

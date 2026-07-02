@@ -24,6 +24,29 @@ import type { LocalMessage } from '@/types/types';
 
 const IMAGE_DAILY_LIMIT = 10;
 
+// ─── File attachment rate-limit helpers ───────────────────────────────────────
+
+export const FILE_DAILY_LIMIT_BYTES = 62_914_560; // 60 MB
+
+/** Returns total file bytes uploaded today by the user. */
+export async function getTodayFileBytes(userId: string): Promise<number> {
+  const { data, error } = await supabase.rpc('get_file_send_bytes', { p_user_id: userId });
+  if (error) return 0;
+  return (data as number) ?? 0;
+}
+
+/** Thrown when the user has exhausted their 60 MB/day file allowance. */
+export class FileLimitError extends Error {
+  resetAt: Date;
+  remainingBytes: number;
+  constructor(resetAt: Date, remainingBytes: number) {
+    super('Daily file limit reached');
+    this.name = 'FileLimitError';
+    this.resetAt = resetAt;
+    this.remainingBytes = remainingBytes;
+  }
+}
+
 /** Returns today's image send count for the user. */
 export async function getTodayImageCount(userId: string): Promise<number> {
   const { data, error } = await supabase.rpc('get_image_send_count', { p_user_id: userId });
@@ -205,6 +228,65 @@ export async function uploadVoiceMessage(
 }
 
 /**
+ * Upload any file to Supabase Storage as AES-256-GCM ciphertext.
+ * Returns the storage path, base64-encoded decryption key, original filename,
+ * file size, and MIME type. Throws FileLimitError if the daily 60 MB cap is hit.
+ */
+export async function uploadChatFile(
+  userId: string,
+  file: File
+): Promise<{ storagePath: string; fileKeyBase64: string; fileName: string; fileSize: number; fileMimeType: string }> {
+  const usedBytes = await getTodayFileBytes(userId);
+  if (usedBytes + file.size > FILE_DAILY_LIMIT_BYTES) {
+    const reset = new Date();
+    reset.setUTCHours(24, 0, 0, 0);
+    const remaining = Math.max(0, FILE_DAILY_LIMIT_BYTES - usedBytes);
+    throw new FileLimitError(reset, remaining);
+  }
+
+  const { blob: ciphertextBlob, keyBase64 } = await encryptFileAESGCM(file);
+
+  const storagePath = `${userId}/${crypto.randomUUID()}.enc`;
+  const { error: uploadErr } = await supabase.storage
+    .from('chat-files')
+    .upload(storagePath, ciphertextBlob, { contentType: 'application/octet-stream', upsert: false });
+  if (uploadErr) throw new Error(`File upload failed: ${uploadErr.message}`);
+
+  await supabase.rpc('increment_file_send_bytes', { p_user_id: userId, p_bytes: file.size });
+
+  return {
+    storagePath,
+    fileKeyBase64: keyBase64,
+    fileName: file.name,
+    fileSize: file.size,
+    fileMimeType: file.type || 'application/octet-stream',
+  };
+}
+
+/**
+ * Fetch an encrypted file blob from Supabase Storage via a short-lived signed URL,
+ * decrypt with AES-256-GCM, and return an object URL for download.
+ * The caller is responsible for calling URL.revokeObjectURL() when done.
+ */
+export async function fetchAndDecryptChatFile(
+  storagePath: string,
+  fileKeyBase64: string,
+  mimeType: string
+): Promise<string> {
+  const { data: signedData, error: signErr } = await supabase.storage
+    .from('chat-files')
+    .createSignedUrl(storagePath, 3600);
+  if (signErr || !signedData?.signedUrl) throw new Error('Failed to create signed URL for file');
+
+  const response = await fetch(signedData.signedUrl);
+  if (!response.ok) throw new Error(`Failed to fetch encrypted file: ${response.status}`);
+  const ciphertextBlob = await response.blob();
+
+  const plainbuf = await decryptBlobAESGCM(ciphertextBlob, fileKeyBase64);
+  return URL.createObjectURL(new Blob([plainbuf], { type: mimeType || 'application/octet-stream' }));
+}
+
+/**
  * Fetch an encrypted voice blob from Supabase Storage via a short-lived signed URL,
  * decrypt it with the provided AES-256-GCM key, and return an object URL for playback.
  * The caller is responsible for calling URL.revokeObjectURL() when done.
@@ -234,10 +316,11 @@ export async function sendEncryptedMessage(
   conversationId: string,
   plaintext: string,
   recipientPublicKey: string,
-  messageId?: string,  // caller can pass a stable ID so DB row matches optimistic UI entry
-  imageAttachment?: { storagePath: string; imageKeyBase64: string }, // encrypted image metadata
-  replyTo?: import('@/types/types').ReplyTo | null, // optional reply context
-  voiceAttachment?: { storagePath: string; voiceKeyBase64: string; voiceDuration: number } // encrypted voice metadata
+  messageId?: string,
+  imageAttachment?: { storagePath: string; imageKeyBase64: string },
+  replyTo?: import('@/types/types').ReplyTo | null,
+  voiceAttachment?: { storagePath: string; voiceKeyBase64: string; voiceDuration: number },
+  fileAttachment?: { storagePath: string; fileKeyBase64: string; fileName: string; fileSize: number; fileMimeType: string }
 ): Promise<LocalMessage> {
   // Get or initialize ratchet session
   let session = await getRatchetSession(conversationId);
@@ -289,9 +372,19 @@ export async function sendEncryptedMessage(
   // If there is an image attachment, embed the storage path and AES key INSIDE the
   // ratchet plaintext so they travel encrypted end-to-end and are never visible to
   // the relay operator.  Plain text-only messages stay as a bare string (backward compat).
-  // v:2 = image attachment; v:3 = voice message; both may coexist with text.
+  // v:2 = image attachment; v:3 = voice message; v:4 = file attachment; all may coexist with text.
   let ratchetPlaintext = plaintext;
-  if (voiceAttachment) {
+  if (fileAttachment) {
+    ratchetPlaintext = JSON.stringify({
+      v: 4,
+      t: plaintext,
+      fsp: fileAttachment.storagePath,
+      fk: fileAttachment.fileKeyBase64,
+      fn: fileAttachment.fileName,
+      fs: fileAttachment.fileSize,
+      ft: fileAttachment.fileMimeType,
+    });
+  } else if (voiceAttachment) {
     ratchetPlaintext = JSON.stringify({
       v: 3,
       t: plaintext,
@@ -346,6 +439,11 @@ export async function sendEncryptedMessage(
     voiceStoragePath: voiceAttachment?.storagePath ?? null,
     voiceKeyBase64: voiceAttachment?.voiceKeyBase64 ?? null,
     voiceDuration: voiceAttachment?.voiceDuration ?? null,
+    fileStoragePath: fileAttachment?.storagePath ?? null,
+    fileKeyBase64: fileAttachment?.fileKeyBase64 ?? null,
+    fileName: fileAttachment?.fileName ?? null,
+    fileSize: fileAttachment?.fileSize ?? null,
+    fileMimeType: fileAttachment?.fileMimeType ?? null,
   };
 
   // Save sender's copy to DB (persists across logout/login)
@@ -398,7 +496,7 @@ export async function receiveAndDecryptMessage(
     const { plaintext: decrypted, updatedSession } = await ratchetDecrypt(session, envelope);
     await saveRatchetSession(updatedSession);
 
-    // If the decrypted payload is a v2/v3 structured message, extract text and attachment metadata.
+    // If the decrypted payload is a v2/v3/v4 structured message, extract text and attachment metadata.
     // Storage path and AES key travelled securely inside the ratchet ciphertext.
     let content = decrypted;
     let imageStoragePath: string | null = null;
@@ -406,8 +504,18 @@ export async function receiveAndDecryptMessage(
     let voiceStoragePath: string | null = null;
     let voiceKeyBase64: string | null = null;
     let voiceDuration: number | null = null;
+    let fileStoragePath: string | null = null;
+    let fileKeyBase64: string | null = null;
+    let fileName: string | null = null;
+    let fileSize: number | null = null;
+    let fileMimeType: string | null = null;
     try {
-      const parsed: { v?: number; t?: string; isp?: string; ik?: string; vsp?: string; vk?: string; vd?: number } = JSON.parse(decrypted);
+      const parsed: {
+        v?: number; t?: string;
+        isp?: string; ik?: string;
+        vsp?: string; vk?: string; vd?: number;
+        fsp?: string; fk?: string; fn?: string; fs?: number; ft?: string;
+      } = JSON.parse(decrypted);
       if (parsed.v === 2) {
         content = parsed.t ?? '';
         imageStoragePath = parsed.isp ?? null;
@@ -417,6 +525,13 @@ export async function receiveAndDecryptMessage(
         voiceStoragePath = parsed.vsp ?? null;
         voiceKeyBase64 = parsed.vk ?? null;
         voiceDuration = parsed.vd ?? null;
+      } else if (parsed.v === 4) {
+        content = parsed.t ?? '';
+        fileStoragePath = parsed.fsp ?? null;
+        fileKeyBase64 = parsed.fk ?? null;
+        fileName = parsed.fn ?? null;
+        fileSize = parsed.fs ?? null;
+        fileMimeType = parsed.ft ?? null;
       }
     } catch { /* plain-text message — leave content unchanged */ }
 
@@ -439,6 +554,11 @@ export async function receiveAndDecryptMessage(
       voiceStoragePath,
       voiceKeyBase64,
       voiceDuration,
+      fileStoragePath,
+      fileKeyBase64,
+      fileName,
+      fileSize,
+      fileMimeType,
     };
 
     // Save receiver's copy to DB — owner_id = myUserId (the recipient saving their copy),
@@ -502,6 +622,118 @@ export function subscribeToRelay(
   return () => {
     supabase.removeChannel(channel);
   };
+}
+
+// ─── Message reactions ────────────────────────────────────────────────────────
+
+import type { MessageReaction } from '@/types/types';
+
+/**
+ * Add an emoji reaction to a message. No-op if the same reaction already exists.
+ * Reactions are stored server-side as low-sensitivity metadata (emoji only).
+ */
+export async function addReaction(
+  messageId: string,
+  conversationId: string,
+  senderId: string,
+  recipientId: string,
+  emoji: string
+): Promise<void> {
+  const { error } = await supabase
+    .from('message_reactions')
+    .upsert(
+      { message_id: messageId, conversation_id: conversationId, sender_id: senderId, recipient_id: recipientId, emoji },
+      { onConflict: 'message_id,sender_id,emoji' }
+    );
+  if (error) console.error('[ShadowCrypt] addReaction error:', error.message);
+}
+
+/**
+ * Remove the caller's emoji reaction from a message.
+ */
+export async function removeReaction(
+  messageId: string,
+  senderId: string,
+  emoji: string
+): Promise<void> {
+  const { error } = await supabase
+    .from('message_reactions')
+    .delete()
+    .eq('message_id', messageId)
+    .eq('sender_id', senderId)
+    .eq('emoji', emoji);
+  if (error) console.error('[ShadowCrypt] removeReaction error:', error.message);
+}
+
+/**
+ * Fetch all reactions for a set of message IDs in a conversation.
+ * Returns a map of messageId → MessageReaction[].
+ */
+export async function fetchReactionsForConversation(
+  conversationId: string
+): Promise<Map<string, MessageReaction[]>> {
+  const { data, error } = await supabase
+    .from('message_reactions')
+    .select('*')
+    .eq('conversation_id', conversationId)
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    console.error('[ShadowCrypt] fetchReactions error:', error.message);
+    return new Map();
+  }
+
+  const map = new Map<string, MessageReaction[]>();
+  for (const row of data ?? []) {
+    const msgId = row.message_id as string;
+    if (!map.has(msgId)) map.set(msgId, []);
+    map.get(msgId)!.push({
+      id: row.id as string,
+      messageId: msgId,
+      senderId: row.sender_id as string,
+      emoji: row.emoji as string,
+      createdAt: new Date(row.created_at as string).getTime(),
+    });
+  }
+  return map;
+}
+
+/**
+ * Subscribe to reaction INSERT/DELETE events for a conversation via Supabase Realtime.
+ * Calls onAdd for new reactions and onRemove for deleted ones.
+ */
+export function subscribeToReactions(
+  conversationId: string,
+  onAdd: (reaction: MessageReaction) => void,
+  onRemove: (reactionId: string, messageId: string) => void
+): () => void {
+  const channel = supabase
+    .channel(`reactions:${conversationId}`)
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'message_reactions', filter: `conversation_id=eq.${conversationId}` },
+      payload => {
+        const row = payload.new as Record<string, unknown>;
+        onAdd({
+          id: row.id as string,
+          messageId: row.message_id as string,
+          senderId: row.sender_id as string,
+          emoji: row.emoji as string,
+          createdAt: new Date(row.created_at as string).getTime(),
+        });
+      }
+    )
+    .on(
+      'postgres_changes',
+      { event: 'DELETE', schema: 'public', table: 'message_reactions', filter: `conversation_id=eq.${conversationId}` },
+      payload => {
+        const row = payload.old as Record<string, unknown>;
+        onRemove(row.id as string, row.message_id as string);
+      }
+    )
+    .subscribe();
+
+  return () => { supabase.removeChannel(channel); };
 }
 
 // Look up a user's public key by user ID
