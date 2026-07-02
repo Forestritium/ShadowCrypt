@@ -8,6 +8,29 @@ import { useRef } from 'react';
 import { Paperclip } from 'lucide-react';
 import { toast } from 'sonner';
 
+/**
+ * Blocked file extensions — executable and potentially harmful formats.
+ * Updated to a comprehensive list covering all major platforms.
+ */
+const BLOCKED_EXTENSIONS = new Set([
+  // Windows executables & scripts
+  'exe', 'bat', 'cmd', 'com', 'pif', 'scr', 'vbs', 'vbe', 'wsf', 'wsc', 'wsh',
+  'ps1', 'ps2', 'msi', 'msp', 'mst', 'reg', 'hta', 'cpl', 'dll', 'sys', 'drv',
+  'lnk', 'inf', 'gadget', 'application', 'xbap', 'xnk',
+  // macOS executables
+  'dmg', 'pkg', 'app', 'command', 'osx',
+  // Linux / Unix executables
+  'sh', 'bash', 'run', 'bin', 'deb', 'rpm', 'appimage',
+  // Java / cross-platform
+  'jar', 'jnlp',
+  // Android / iOS
+  'apk', 'ipa', 'xapk',
+  // Archive-as-dropper formats
+  'iso', 'img',
+  // Office macros
+  'xlsm', 'xlsb', 'xltm', 'docm', 'dotm', 'pptm', 'potm',
+]);
+
 interface FileAttachmentButtonProps {
   onFileSelected: (file: File) => void;
   disabled?: boolean;
@@ -28,6 +51,14 @@ export function FileAttachmentButton({
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
+
+    // Block dangerous/executable file extensions
+    const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+    if (BLOCKED_EXTENSIONS.has(ext)) {
+      toast.error(`File type .${ext} is not allowed for security reasons.`);
+      return;
+    }
+
     if (file.size > remainingBytes) {
       const remainingMBStr = (remainingBytes / (1024 * 1024)).toFixed(1);
       const fileMBStr = (file.size / (1024 * 1024)).toFixed(1);

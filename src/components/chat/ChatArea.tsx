@@ -686,10 +686,8 @@ export function ChatArea({
   };
 
   /** Called by FileAttachmentButton when a file is selected. */
-  const handleFileSelected = useCallback(async (file: File) => {
+  const handleFileSelected = useCallback((file: File) => {
     if (!conversation || uploadingFile) return;
-    const contact = contacts.find(c => c.id === conversation.contact?.id);
-    if (!contact) { toast.error('Contact not found.'); return; }
 
     // Pre-check quota client-side for fast feedback
     if (todayFileBytes + file.size > FILE_DAILY_LIMIT_BYTES) {
@@ -701,74 +699,9 @@ export function ChatArea({
       return;
     }
 
+    // Stage the file — upload + send happens when the user clicks Send
     setSelectedFile(file);
-    const tempId = crypto.randomUUID();
-    setUploadingFile(true);
-
-    let fileAttachment: { storagePath: string; fileKeyBase64: string; fileName: string; fileSize: number; fileMimeType: string } | undefined;
-    try {
-      fileAttachment = await uploadChatFile(currentUserId, file);
-      setTodayFileBytes(b => b + file.size);
-    } catch (err) {
-      if (err instanceof FileLimitError) {
-        setFileLimitResetAt(err.resetAt);
-        setFileLimitRemaining(err.remainingBytes);
-        setFileLimitOpen(true);
-      } else {
-        toast.error('File upload failed. Please try again.');
-      }
-      setUploadingFile(false);
-      setSelectedFile(null);
-      return;
-    }
-    setUploadingFile(false);
-    setSelectedFile(null);
-
-    const optimistic: LocalMessage = {
-      id: tempId,
-      conversationId: conversation.id,
-      senderId: currentUserId,
-      senderUsername: currentUsername,
-      content: '',
-      timestamp: Date.now(),
-      status: 'sent',
-      isOwn: true,
-      imageUrl: null,
-      imageStoragePath: null,
-      imageKeyBase64: null,
-      replyTo: null,
-      voiceStoragePath: null,
-      voiceKeyBase64: null,
-      voiceDuration: null,
-      fileStoragePath: fileAttachment.storagePath,
-      fileKeyBase64: fileAttachment.fileKeyBase64,
-      fileName: fileAttachment.fileName,
-      fileSize: fileAttachment.fileSize,
-      fileMimeType: fileAttachment.fileMimeType,
-    };
-    setMessages(prev => [...prev, optimistic]);
-
-    try {
-      await sendEncryptedMessage(
-        currentUserId, currentUsername, contact.id,
-        conversation.id, '', contact.publicKey, tempId,
-        undefined, null, undefined, fileAttachment
-      );
-      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'delivered' } : m));
-      onMessageSent();
-    } catch (err) {
-      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'failed' } : m));
-      const msg = (err as Error).message ?? '';
-      if (msg.startsWith('LEGACY_KEY_FORMAT')) {
-        toast.error('Cannot send file', {
-          description: `@${contact.username} needs to re-login to update their encryption key.`,
-        });
-      } else {
-        toast.error('Failed to send file. Please try again.');
-      }
-      console.error('[ShadowCrypt] File send error:', err);
-    }
-  }, [conversation, contacts, currentUserId, currentUsername, uploadingFile, todayFileBytes, onMessageSent]);
+  }, [conversation, uploadingFile, todayFileBytes]);
 
   /** Toggle (add or remove) an emoji reaction on a message. */
   const handleReact = useCallback(async (msg: LocalMessage, emoji: string, alreadyReacted?: boolean) => {
@@ -808,15 +741,17 @@ export function ChatArea({
 
   const handleSend = async () => {
     const text = input.trim();
-    if (!text && !selectedImage) return;
-    if (!conversation || sending || uploadingImage) return;
+    if (!text && !selectedImage && !selectedFile) return;
+    if (!conversation || sending || uploadingImage || uploadingFile) return;
 
     const contact = contacts.find(c => c.id === conversation.contact?.id);
     if (!contact) { toast.error('Contact not found.'); return; }
 
     const tempId = crypto.randomUUID();
     let imageAttachment: { storagePath: string; imageKeyBase64: string } | undefined;
+    let fileAttachment: { storagePath: string; fileKeyBase64: string; fileName: string; fileSize: number; fileMimeType: string } | undefined;
 
+    // Upload image if selected
     if (selectedImage) {
       setUploadingImage(true);
       try {
@@ -833,6 +768,26 @@ export function ChatArea({
         return;
       }
       setUploadingImage(false);
+    }
+
+    // Upload file if staged
+    if (selectedFile) {
+      setUploadingFile(true);
+      try {
+        fileAttachment = await uploadChatFile(currentUserId, selectedFile);
+        setTodayFileBytes(b => b + selectedFile.size);
+      } catch (err) {
+        if (err instanceof FileLimitError) {
+          setFileLimitResetAt(err.resetAt);
+          setFileLimitRemaining(err.remainingBytes);
+          setFileLimitOpen(true);
+        } else {
+          toast.error('File upload failed. Please try again.');
+        }
+        setUploadingFile(false);
+        return;
+      }
+      setUploadingFile(false);
     }
 
     const currentReply = replyingTo;
@@ -853,22 +808,24 @@ export function ChatArea({
       voiceStoragePath: null,
       voiceKeyBase64: null,
       voiceDuration: null,
-      fileStoragePath: null,
-      fileKeyBase64: null,
-      fileName: null,
-      fileSize: null,
-      fileMimeType: null,
+      fileStoragePath: fileAttachment?.storagePath ?? null,
+      fileKeyBase64: fileAttachment?.fileKeyBase64 ?? null,
+      fileName: fileAttachment?.fileName ?? null,
+      fileSize: fileAttachment?.fileSize ?? null,
+      fileMimeType: fileAttachment?.fileMimeType ?? null,
     };
     setMessages(prev => [...prev, optimistic]);
     setInput('');
     setReplyingTo(null);
     clearSelectedImage();
+    setSelectedFile(null);
     textareaRef.current?.focus();
 
     try {
       await sendEncryptedMessage(
         currentUserId, currentUsername, contact.id,
-        conversation.id, text, contact.publicKey, tempId, imageAttachment, currentReply
+        conversation.id, text, contact.publicKey, tempId,
+        imageAttachment, currentReply, undefined, fileAttachment
       );
       setMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'delivered' } : m));
       onMessageSent();
@@ -1272,16 +1229,24 @@ export function ChatArea({
               </div>
             )}
 
-            {/* File preview strip */}
+            {/* File preview strip — shown while a file is staged but not yet sent */}
             {selectedFile && (
               <div className="flex items-center gap-2 bg-muted/60 border border-border rounded-xl px-3 py-2">
                 <Paperclip className="w-4 h-4 text-primary shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium text-foreground truncate">{selectedFile.name}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    {(selectedFile.size / (1024 * 1024)).toFixed(1)} MB · Encrypting…
+                    {(selectedFile.size / (1024 * 1024)).toFixed(1)} MB · Ready to send
                   </p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedFile(null)}
+                  className="shrink-0 w-5 h-5 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                  aria-label="Remove file"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
               </div>
             )}
 
@@ -1340,7 +1305,7 @@ export function ChatArea({
               />
               <Button
                 onClick={handleSend}
-                disabled={(!input.trim() && !selectedImage) || sending || uploadingImage || uploadingVoice || uploadingFile}
+                disabled={(!input.trim() && !selectedImage && !selectedFile) || sending || uploadingImage || uploadingVoice || uploadingFile}
                 size="icon"
                 className="w-10 h-10 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 shrink-0"
                 aria-label="Send"
