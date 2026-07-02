@@ -257,7 +257,7 @@ export async function uploadChatFile(
   return {
     storagePath,
     fileKeyBase64: keyBase64,
-    fileName: file.name,
+    fileName: file.name.trim().slice(0, 255),
     fileSize: file.size,
     fileMimeType: file.type || 'application/octet-stream',
   };

@@ -6,6 +6,7 @@
 
 import { useRef } from 'react';
 import { Paperclip } from 'lucide-react';
+import { toast } from 'sonner';
 
 interface FileAttachmentButtonProps {
   onFileSelected: (file: File) => void;
@@ -26,7 +27,17 @@ export function FileAttachmentButton({
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
-    if (file) onFileSelected(file);
+    if (!file) return;
+    if (file.size > remainingBytes) {
+      const remainingMBStr = (remainingBytes / (1024 * 1024)).toFixed(1);
+      const fileMBStr = (file.size / (1024 * 1024)).toFixed(1);
+      toast.error(
+        `File too large for today's remaining quota. ` +
+        `File is ${fileMBStr} MB but only ${remainingMBStr} MB left today.`
+      );
+      return;
+    }
+    onFileSelected(file);
   };
 
   const remainingMB = (remainingBytes / (1024 * 1024)).toFixed(0);
