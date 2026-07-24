@@ -53,7 +53,7 @@ export default function ThemesPage() {
 
       const { data, error } = await req;
       if (!error && data) {
-        setPublicThemes(data.map(d => ({
+        setPublicThemes(data.map((d: any) => ({
           id: `public_${d.id}`,
           name: d.name,
           description: d.description,

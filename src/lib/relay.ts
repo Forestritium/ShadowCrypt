@@ -508,17 +508,17 @@ export function subscribeToDeviceChanges(
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'user_devices', filter: `user_id=eq.${userId}` },
-      payload => onChange(payload.new as UserDevice, 'INSERT')
+      (payload: any) => onChange((payload as any).new as UserDevice, 'INSERT')
     )
     .on(
       'postgres_changes',
       { event: 'UPDATE', schema: 'public', table: 'user_devices', filter: `user_id=eq.${userId}` },
-      payload => onChange(payload.new as UserDevice, 'UPDATE')
+      (payload: any) => onChange((payload as any).new as UserDevice, 'UPDATE')
     )
     .on(
       'postgres_changes',
       { event: 'DELETE', schema: 'public', table: 'user_devices', filter: `user_id=eq.${userId}` },
-      payload => onChange(payload.old as UserDevice, 'DELETE')
+      (payload: any) => onChange((payload as any).old as UserDevice, 'DELETE')
     )
     .subscribe();
   return () => { supabase.removeChannel(channel); };
@@ -1941,7 +1941,7 @@ export function subscribeToRelay(
           table: 'relay_messages',
           filter: `recipient_id=eq.${userId}`,
         },
-        payload => {
+        (payload: any) => {
           relayListeners.forEach(({ onMessage: cb }) => {
             try {
               const maybePromise = cb(payload.new as RelayMessage);
@@ -1958,7 +1958,7 @@ export function subscribeToRelay(
           });
         }
       )
-      .subscribe((status) => {
+      .subscribe((status: any) => {
         if (status === 'SUBSCRIBED') {
           // Drain any messages that arrived during the gap (initial connect or
           // after a reconnect).  onReady is intentionally called on every
@@ -2051,7 +2051,7 @@ function getReactionChannel(conversationId: string) {
 
     const channel = supabase
       .channel(`reactions:${conversationId}`, { config: { broadcast: { ack: false } } })
-      .on('broadcast', { event: 'reaction' }, ({ payload }) => {
+      .on('broadcast', { event: 'reaction' }, ({ payload }: any) => {
         const p = payload as ReactionAddBroadcast | ReactionRemoveBroadcast;
         listeners.forEach(({ onAdd, onRemove }) => {
           if (p.type === 'add') {
@@ -2070,7 +2070,7 @@ function getReactionChannel(conversationId: string) {
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'message_reactions', filter: `conversation_id=eq.${conversationId}` },
-        payload => {
+        (payload: any) => {
           const row = payload.new as Record<string, unknown>;
           const reaction: MessageReaction = {
             id: row.id as string,
@@ -2085,7 +2085,7 @@ function getReactionChannel(conversationId: string) {
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'message_reactions', filter: `conversation_id=eq.${conversationId}` },
-        payload => {
+        (payload: any) => {
           const row = payload.new as Record<string, unknown>;
           const reaction: MessageReaction = {
             id: row.id as string,
@@ -2100,14 +2100,14 @@ function getReactionChannel(conversationId: string) {
       .on(
         'postgres_changes',
         { event: 'DELETE', schema: 'public', table: 'message_reactions', filter: `conversation_id=eq.${conversationId}` },
-        payload => {
+        (payload: any) => {
           const row = payload.old as Record<string, unknown>;
           listeners.forEach(({ onRemove }) =>
             onRemove(row.id as string, row.message_id as string, row.sender_id as string, row.emoji as string)
           );
         }
       )
-      .subscribe((status) => {
+      .subscribe((status: any) => {
         if (!entry) return;
         entry.subscribed = status === 'SUBSCRIBED';
         if (status === 'SUBSCRIBED' && pending.length > 0) {
@@ -2444,7 +2444,7 @@ export async function fetchIncomingRequests(userId: string): Promise<ContactRequ
   if (error || !data) return [];
 
   const enriched: ContactRequest[] = await Promise.all(
-    data.map(async (req) => {
+    data.map(async (req: any) => {
       const { data: profile } = await supabase
         .from('public_profiles')
         .select('username, public_key')
@@ -2474,7 +2474,7 @@ export async function fetchOutgoingRequests(userId: string): Promise<ContactRequ
 
   // Enrich with receiver username + public key (needed to save contact when accepted)
   const enriched: ContactRequest[] = await Promise.all(
-    data.map(async (req) => {
+    data.map(async (req: any) => {
       const { data: profile } = await supabase
         .from('public_profiles')
         .select('username, public_key')
@@ -2540,7 +2540,7 @@ export function subscribeToContactRequests(
         table: 'contact_requests',
         filter: `receiver_id=eq.${userId}`,
       },
-      async (payload) => {
+      async (payload: any) => {
         const req = payload.new as ContactRequest & { sender_public_key?: string | null };
         const { data: profile } = await supabase
           .from('public_profiles')
@@ -2555,7 +2555,7 @@ export function subscribeToContactRequests(
         });
       }
     )
-    .subscribe((status) => {
+    .subscribe((status: any) => {
       if (status === 'SUBSCRIBED' && onReconnect) onReconnect();
     });
 
@@ -2582,14 +2582,14 @@ export function subscribeToOutgoingRequestUpdates(
         table: 'contact_requests',
         filter: `sender_id=eq.${userId}`,
       },
-      (payload) => {
+      (payload: any) => {
         const updated = payload.new as ContactRequest;
         if (updated.status === 'accepted' || updated.status === 'rejected') {
           onStatusChange(updated.id, updated.status);
         }
       }
     )
-    .subscribe((status) => {
+    .subscribe((status: any) => {
       if (status === 'SUBSCRIBED' && onReconnect) onReconnect();
     });
 
@@ -2677,7 +2677,7 @@ export async function fetchBlockedUserIds(): Promise<string[]> {
   const { data } = await supabase
     .from('blocked_users')
     .select('blocked_id');
-  return (data ?? []).map(r => r.blocked_id as string);
+  return (data ?? []).map((r: any) => r.blocked_id as string);
 }
 
 /** Check if a specific user is blocked by the current user. */
@@ -2786,12 +2786,12 @@ export async function fetchBlockedUsers(): Promise<{ id: string; username: strin
     .select('blocked_id')
     .eq('blocker_id', user.id);
   if (!blocked || blocked.length === 0) return [];
-  const ids = blocked.map(r => r.blocked_id as string);
+  const ids = blocked.map((r: any) => r.blocked_id as string);
   const { data: profiles } = await supabase
     .from('public_profiles')
     .select('id, username')
     .in('id', ids);
-  return (profiles ?? []).map(p => ({ id: p.id as string, username: p.username as string }));
+  return (profiles ?? []).map((p: any) => ({ id: p.id as string, username: p.username as string }));
 }
 
 // ========================
@@ -2852,10 +2852,10 @@ export async function fetchPendingRemovals(userId: string): Promise<{removerId: 
 
   // Delete processed rows before returning so that a subsequent login won't
   // re-process the same notifications even if the caller crashes mid-flight.
-  const ids = data.map(r => r.id as string);
+  const ids = data.map((r: any) => r.id as string);
   await supabase.from('contact_removals').delete().in('id', ids);
 
-  return data.map(r => ({ removerId: r.remover_id as string, isBlock: r.is_block as boolean }));
+  return data.map((r: any) => ({ removerId: r.remover_id as string, isBlock: r.is_block as boolean }));
 }
 
 /**
@@ -2876,7 +2876,7 @@ export function subscribeToContactRemovals(
         table: 'contact_removals',
         filter: `removed_id=eq.${userId}`,
       },
-      async (payload) => {
+      async (payload: any) => {
         const row = payload.new as { remover_id: string; id: string; is_block: boolean };
         onRemoved({ removerId: row.remover_id, isBlock: row.is_block });
         // Delete the row immediately so it isn't replayed by fetchPendingRemovals
@@ -2928,8 +2928,8 @@ export async function fetchAcceptedContacts(
     .eq('status', 'accepted');
 
   const peerIds = [
-    ...((sent ?? []).map(r => r.receiver_id as string)),
-    ...((received ?? []).map(r => r.sender_id as string)),
+    ...((sent ?? []).map((r: any) => r.receiver_id as string)),
+    ...((received ?? []).map((r: any) => r.sender_id as string)),
   ];
   if (peerIds.length === 0) return [];
 
@@ -2938,8 +2938,8 @@ export async function fetchAcceptedContacts(
     .select('id, username, public_key')
     .in('id', peerIds);
 
-  const profileMap = new Map(
-    (profiles ?? []).map(p => [p.id as string, p])
+  const profileMap = new Map<string, any>(
+    (profiles ?? []).map((p: any) => [p.id as string, p])
   );
 
   return peerIds.map(peerId => {
@@ -2948,7 +2948,7 @@ export async function fetchAcceptedContacts(
     // the sender's public key. Use that as a fallback when the profile row
     // hasn't been populated yet, which commonly happens for users who
     // haven't re-synced their keys to public_profiles.
-    const requestKey = (received ?? []).find(r => r.sender_id === peerId)?.sender_public_key as string | undefined;
+    const requestKey = (received ?? []).find((r: any) => r.sender_id === peerId)?.sender_public_key as string | undefined;
     const publicKey = profile?.public_key ?? requestKey ?? null;
     if (!publicKey) return null;
     return {
@@ -3089,7 +3089,7 @@ export async function refreshContactPublicKeys(
 
   const storedMap = new Map(contacts.map(c => [c.id, c]));
 
-  await Promise.all(profiles.map(async (profile) => {
+  await Promise.all(profiles.map(async (profile: any) => {
     const freshKey = profile.public_key as string | null;
     if (!freshKey) return;
     const stored = storedMap.get(profile.id as string);

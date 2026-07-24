@@ -158,7 +158,7 @@ function SidebarContent({
       .from('public_profiles')
       .select('id, avatar_url, avatar_private')
       .in('id', ids)
-      .then(({ data }) => {
+      .then(({ data }: any) => {
         if (!data) return;
         const map: Record<string, { url: string | null; private: boolean }> = {};
         for (const row of data) {

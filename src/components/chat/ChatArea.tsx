@@ -986,7 +986,7 @@ export function ChatArea({
         .select('bio, avatar_url, avatar_private')
         .eq('id', conversation.contact.id)
         .maybeSingle()
-        .then(({ data }) => {
+        .then(({ data }: any) => {
           setContactBio(data?.bio ?? null);
           setContactAvatarUrl(data?.avatar_url ?? null);
           setContactAvatarPrivate(data?.avatar_private ?? false);
@@ -1022,7 +1022,7 @@ export function ChatArea({
           table: 'conversation_pins',
           filter: `conversation_id=eq.${conversation.id}`,
         },
-        (payload) => {
+        (payload: any) => {
           const msgId = (payload.new as { message_id?: string }).message_id;
           if (msgId) {
             setConversationPins(prev => {
@@ -1041,7 +1041,7 @@ export function ChatArea({
           table: 'conversation_pins',
           filter: `conversation_id=eq.${conversation.id}`,
         },
-        (payload) => {
+        (payload: any) => {
           const msgId = (payload.old as { message_id?: string }).message_id;
           if (msgId) {
             setConversationPins(prev => {

@@ -70,7 +70,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const vaultReadyRef = { current: false };
 
     supabase.auth.getSession()
-      .then(async ({ data: { session: authSession } }) => {
+      .then(async ({ data: { session: authSession } }: any) => {
         setUser(authSession?.user ?? null);
         if (authSession?.user) {
           getProfile(authSession.user.id).then(setProfile);
@@ -177,12 +177,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // breaking "Keep Me Signed In" on every page refresh.
         setLoading(false);
       })
-      .catch(error => {
+      .catch((error: any) => {
         toast.error(`Session error: ${error.message}`);
         setLoading(false); // must also set loading=false on error so UI unblocks
       });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, authSession) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event: any, authSession: any) => {
       if (event === 'TOKEN_REFRESHED') {
         // Token was silently refreshed — update the User reference so downstream
         // hooks always have the freshest object, but do NOT touch session or profile.

@@ -81,7 +81,7 @@ export async function getContactsFromDB(ownerId: string): Promise<Contact[]> {
   // consistent with the contact's own sidebar fingerprint even after key rotation
   // (the DB trigger keeps public_key current; fingerprint is derived here).
   return Promise.all(
-    (data ?? []).map(async row => ({
+    (data ?? []).map(async (row: any) => ({
       id: row.contact_id as string,
       username: row.username as string,
       publicKey: row.public_key as string,
@@ -176,14 +176,14 @@ export async function getMessagesFromDB(
   // Decrypt each message's content, image key, and voice key with the vault key before returning
   // Filter out messages the user deleted for themselves or that have already expired locally.
   const nowMs = Date.now();
-  const visibleRows = (data ?? []).filter(row => {
+  const visibleRows = (data ?? []).filter((row: any) => {
     if (row.is_deleted_for_me as boolean) return false;
     const expiresAt = row.expires_at ? new Date(row.expires_at as string).getTime() : null;
     if (expiresAt && expiresAt <= nowMs) return false;
     return true;
   });
   const decrypted = await Promise.all(
-    visibleRows.map(async row => ({
+    visibleRows.map(async (row: any) => ({
       id: row.id as string,
       conversationId: row.conversation_id as string,
       senderId: row.sender_id as string,
@@ -496,11 +496,11 @@ export function subscribeToMessages(
           table: 'messages',
           filter: `owner_id=eq.${ownerId}`,
         },
-        (payload) => {
+        (payload: any) => {
           messageListeners.forEach((cb) => cb(payload));
         }
       )
-      .subscribe((status) => {
+      .subscribe((status: any) => {
         if (status === 'SUBSCRIBED' && onReconnect) {
           onReconnect();
         }
@@ -665,7 +665,7 @@ export async function getPersonalPins(
     console.error('[dbStore] getPersonalPins error:', error.message);
     return [];
   }
-  return (data ?? []).map(row => ({
+  return (data ?? []).map((row: any) => ({
     id: row.id as string,
     conversationId: row.conversation_id as string,
     messageId: row.message_id as string,
@@ -709,7 +709,7 @@ export async function getConversationPins(
     console.error('[dbStore] getConversationPins error:', error.message);
     return [];
   }
-  return (data ?? []).map(row => ({
+  return (data ?? []).map((row: any) => ({
     id: row.id as string,
     conversationId: row.conversation_id as string,
     messageId: row.message_id as string,
