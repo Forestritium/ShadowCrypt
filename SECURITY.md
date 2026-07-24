@@ -1,0 +1,137 @@
+# Security Policy
+
+## Overview
+
+ShadowCrypt is built around a zero-knowledge security model. This document describes the threat model, cryptographic design, known limitations, and the responsible disclosure process.
+
+---
+
+## Supported Versions
+
+| Version | Supported |
+|---|---|
+| Latest (`main`) | Active security support |
+| Older releases | No longer maintained |
+
+Always run the latest version.
+
+---
+
+## Threat Model
+
+### What ShadowCrypt protects against
+
+| Threat | Mitigation |
+|---|---|
+| **Server compromise** | The server only stores encrypted ciphertext. It cannot read messages, contacts, or identity keys. |
+| **Database leak** | All message content and image keys are AES-256-GCM encrypted with the user's vault key before being written to Supabase. A raw DB dump reveals only opaque blobs. |
+| **Man-in-the-middle on the relay** | Messages are encrypted end-to-end with the Double Ratchet before being sent to the relay. The relay only routes ciphertext. |
+| **Retrospective decryption** | The Double Ratchet provides full forward secrecy. Each message uses a unique derived key. Compromise of one key does not expose past or future messages. |
+| **Ratchet header metadata** | Envelope headers (senderPublicKey, messageNumber, prevChainLength) are AES-256-GCM encrypted with a shared header key (HK) derived from the initial X25519 exchange. The relay operator cannot read ratchet metadata for new sessions. |
+| **Weak passwords** | Argon2id (64 MB memory, 3 iterations) is used for vault key derivation — GPU/ASIC cracking is computationally expensive. |
+| **Password reset without email** | BIP-39 mnemonic is verified by SHA-256 hash comparison server-side. The mnemonic itself is never sent to or stored on the server. |
+| **Notification metadata** | Browser notifications are anonymous — they never reveal the sender's identity or message content. |
+| **Encrypted image exposure** | Chat images are AES-256-GCM encrypted before upload. The decryption key travels inside the Double Ratchet ciphertext and is vault-wrapped before DB storage. The storage bucket is private; images are served via short-lived signed URLs only. |
+| **Encrypted voice exposure** | Voice recordings are AES-256-GCM encrypted before upload (Opus CVBR audio in a WebM container). The decryption key travels inside the Double Ratchet ciphertext and is vault-wrapped before DB storage. The `chat-voices` bucket is private; audio blobs are served via short-lived signed URLs only. Plaintext audio bytes never leave the browser. |
+
+### What ShadowCrypt does NOT protect against
+
+| Threat | Explanation |
+|---|---|
+| **Compromised device / malware** | If the device running ShadowCrypt is compromised, an attacker can read decrypted messages from memory. |
+| **Session hijacking** | A stolen Supabase JWT allows an attacker to receive future encrypted messages as the victim — but cannot decrypt them without the vault key. |
+| **Browser extension attacks** | Malicious browser extensions with access to the page context can intercept plaintext before encryption. |
+| **Physical access** | The vault key is held in `sessionStorage` during an active session for usability. Physical or OS-level access to the browser could expose it. |
+| **Metadata analysis** | ShadowCrypt hides message content but not the fact that two users are communicating or the frequency of communication. |
+| **OS-level screen capture** | No web application can block OS-level screenshots (PrintScreen, Cmd+Shift+3/4, Snipping Tool, screen recorders). The capture deterrence feature hides content on focus loss and intercepts keyboard shortcuts, but this raises friction for casual capture only — it is not a security guarantee. |
+| **Denial of Service** | No specific DDoS mitigations are implemented at the application level. |
+
+---
+
+## Cryptographic Design
+
+### Key Derivation
+
+| Version | Algorithm | Parameters |
+|---|---|---|
+| v1 (current) | **Argon2id** | memory=64 MB, iterations=3, parallelism=1, output=32 bytes |
+| v0 (legacy) | **PBKDF2-SHA256** | 310,000 iterations, output=32 bytes |
+
+New accounts always use v1. v0 accounts are prompted to migrate on first login.
+
+### Message Encryption
+
+ShadowCrypt implements a simplified Signal Protocol **Double Ratchet**:
+
+- **DH Ratchet**: X25519 key pairs. Each ratchet step advances the root key.
+- **KDF Chain**: HMAC-SHA256-based symmetric ratchet for per-message key derivation.
+- **Message encryption**: AES-256-GCM with a 12-byte random IV prepended to ciphertext.
+- **Initialisation**: X25519 shared secret → HKDF-SHA256 → initial root key.
+- **Header encryption**: Envelope headers encrypted with a shared header key (HK) derived via HKDF("ShadowCrypt-HK") from the initial shared secret. Hides ratchet metadata from the relay.
+
+### Vault Encryption
+
+All data in IndexedDB is encrypted as individual JSON blobs:
+- Format: `base64(IV[12] + AES-256-GCM-ciphertext)`
+- Key: derived from the user's password via Argon2id (stored in memory only during session; exported to `sessionStorage` as raw bytes for tab-reload recovery).
+
+### Identity Keys
+
+- X25519 key pair generated in-browser on first registration.
+- Public key stored in Supabase `profiles` table.
+- Private key stored encrypted in the local vault (never transmitted).
+
+### Recovery Phrase
+
+- 12-word BIP-39 mnemonic (128-bit entropy) generated on registration.
+- `SHA-256(normalised_mnemonic)` stored in `profiles.mnemonic_hash`.
+- The mnemonic itself is stored **encrypted in the local vault only**.
+- Password reset flow: client sends mnemonic → server hashes and compares → if match, admin password reset is performed.
+
+---
+
+## Reporting a Vulnerability
+
+**Please do NOT open a public GitHub issue for security vulnerabilities.**
+
+To report a security issue responsibly:
+
+1. **Email**: Send a detailed report to the maintainer's contact listed on the GitHub profile of [A-Solo-Engineer](https://github.com/A-Solo-Engineer).
+2. **Include**:
+   - Description of the vulnerability.
+   - Affected component(s) and version(s).
+   - Steps to reproduce.
+   - Potential impact assessment.
+   - Any suggested mitigations (optional but appreciated).
+3. **Encryption**: If the report contains sensitive details, request a PGP key before sending.
+
+### Response Timeline
+
+| Stage | Target |
+|---|---|
+| Acknowledgement | Within 72 hours |
+| Initial assessment | Within 7 days |
+| Fix or mitigation | Within 30 days (critical), 90 days (moderate) |
+| Public disclosure | Coordinated with reporter after fix is deployed |
+
+We follow [responsible disclosure](https://cheatsheetseries.owasp.org/cheatsheets/Vulnerability_Disclosure_Cheat_Sheet.html). Reporters who follow this process will be credited (unless they prefer anonymity).
+
+---
+
+## Known Limitations
+
+1. **sessionStorage vault key** — The derived vault key is written to `sessionStorage` to survive page reloads within the same browser tab. This is a deliberate usability tradeoff. Users on shared or untrusted machines should log out and close the tab when finished.
+
+2. **No perfect forward secrecy for stored messages** — Forward secrecy applies to the relay (messages deleted after delivery). Messages stored in the local encrypted IndexedDB vault are all protected by the same vault key. If the vault key is compromised, all stored messages are exposed.
+
+3. **Static header key** — The header encryption key (HK) is derived once from the initial X25519/X3DH exchange and does not rotate with each DH ratchet step. This protects headers from a passive relay observer but does not provide per-ratchet-step header key rotation as in the full Signal "sealed sender" specification. Sender identity is separately protected by the sealed-sender box mechanism (see below), which prevents the relay from linking a delivered envelope to its sender.
+
+4. **Daily image limit** — The 10 images/day cap is enforced server-side via a Postgres function. It mitigates storage abuse but is not a security boundary.
+
+5. **Daily voice limit** — The 10 minutes/day voice cap is enforced server-side via the `increment_voice_send_duration` RPC and the `voice_send_durations` table. It mitigates storage abuse but is not a security boundary.
+
+6. **Self-hosted deployments** — If you self-host ShadowCrypt, you are responsible for securing your Supabase project, applying migrations, and keeping dependencies up to date.
+
+7. **ML-KEM-768 secret key storage asymmetry** — The X25519 identity private key is stored as a non-extractable `CryptoKey` object in IndexedDB, meaning Web Crypto will never export its raw bytes to JavaScript at runtime. The ML-KEM-768 secret key (2400 bytes) does not have native Web Crypto support, so it is generated by `@noble/post-quantum`, encoded as a base64 string, and stored via the AES-256-GCM vault (`vaultSetJSON`). This provides the same at-rest encryption as the X25519 key, but the ML-KEM secret key is technically readable by JavaScript while it resides in memory. In practice, if an attacker can execute arbitrary JavaScript in the browser, the X25519 key is equally at risk (via the `SubtleCrypto.sign/deriveBits` interface), so the effective security difference is minimal. However, the asymmetry is documented here for completeness. Future mitigation: wrap the ML-KEM secret key derivation in a WASM module with memory isolation once the Web Crypto API adds ML-KEM support (currently tracked in the W3C WebCryptoAPI issue tracker).
+
+8. **Recovery phrase cloud backup** — The BIP-39 recovery mnemonic is backed up to `profiles.encrypted_mnemonic` as an AES-256-GCM blob encrypted with the user's vault key. The Supabase server never sees the plaintext; however, the backup exists in the user's Supabase row. A Supabase operator with direct DB access cannot read the mnemonic without also obtaining the vault key (which is derived from the user's password and never transmitted). Users who self-host should ensure their Supabase project has appropriate access controls.

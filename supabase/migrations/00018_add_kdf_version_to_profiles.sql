@@ -1,0 +1,1 @@
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS kdf_version integer DEFAULT 0; -- 0 = PBKDF2, 1 = Argon2id

@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="SylvaCrypt" />
+    <link rel="apple-touch-icon" href="/icon-192x192.png" />
+    <meta name="theme-color" content="#09090b" />
+    <meta name="msapplication-TileColor" content="#09090b" />
+    <meta name="msapplication-TileImage" content="/icon-192x192.png" />
+    <meta name="msapplication-square150x150logo" content="/icon-192x192.png" />
+    <meta name="msapplication-wide310x150logo" content="/icon-512x512.png" />
+    <meta name="msapplication-square310x310logo" content="/icon-512x512.png" />
+    <title>SylvaCrypt</title>
+    <meta name="description" content="Zero-knowledge end-to-end encrypted messaging" />
+    <!--
+      Content Security Policy
+      ─────────────────────────────────────────────────────────────────────────
+      default-src 'self'       – block everything not explicitly listed
+      script-src  'self' 'unsafe-inline' 'wasm-unsafe-eval'
+                               – React/Vite inject inline bootstrap scripts;
+                                 'unsafe-inline' is required until Vite ships
+                                 nonce-based injection (tracked upstream).
+                                 'wasm-unsafe-eval' allows WebAssembly compilation
+                                 (e.g. Argon2id) without enabling arbitrary eval().
+      style-src   'self' 'unsafe-inline'
+                               – Tailwind + shadcn emit inline <style> nodes
+      connect-src 'self' https://*.supabase.co wss://*.supabase.co
+                               – Supabase REST, Auth, Realtime, and Storage APIs
+      img-src     'self' data: blob: https://*.supabase.co
+                               – decrypted chat images served as object URLs (blob:)
+                                 and avatar thumbnails from Supabase Storage
+      media-src   'self' blob:
+                               – decrypted voice messages as object URLs (blob:)
+      worker-src  'self' blob:
+                               – future: Argon2id Web Worker
+      font-src    'self' data:
+      frame-src   'none'       – no iframes ever
+      object-src  'none'       – no Flash / legacy embeds
+      base-uri    'self'       – prevent base-tag hijacking
+      form-action 'self'       – prevent form exfiltration
+    -->
+    <meta http-equiv="Content-Security-Policy" content="
+      default-src 'self';
+      script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval';
+      style-src 'self' 'unsafe-inline';
+      connect-src 'self' https://*.supabase.co wss://*.supabase.co;
+      img-src 'self' data: blob: https://*.supabase.co;
+      media-src 'self' blob:;
+      worker-src 'self' blob:;
+      font-src 'self' data:;
+      frame-src 'self';
+      object-src 'none';
+      base-uri 'self';
+      form-action 'self';
+      report-uri /csp-report;
+    " />
+    <!--
+      Permissions Policy (previously Feature Policy)
+      ─────────────────────────────────────────────────────────────────────────
+      microphone=*  – Allow microphone access on this domain only (voice messages)
+      camera=*      – Allow camera access on this domain only (QR scanning)
+      geolocation=() – Disable geolocation
+    -->
+    <meta http-equiv="Permissions-Policy" content="microphone=*, camera=*, geolocation=()" />
+  </head>
+  <body>
+    <div id="error-boundary-debug" style="color: red; background: white; z-index: 99999; position: fixed; top: 0; left: 0; padding: 20px; display: none;"></div>
+    <script>
+      window.addEventListener('error', (event) => {
+        const div = document.getElementById('error-boundary-debug');
+        div.style.display = 'block';
+        div.innerText = 'Runtime Error: ' + event.message + '\n' + (event.error ? event.error.stack : '');
+      });
+      window.addEventListener('unhandledrejection', (event) => {
+        const div = document.getElementById('error-boundary-debug');
+        div.style.display = 'block';
+        div.innerText = 'Promise Rejection: ' + event.reason;
+      });
+    </script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

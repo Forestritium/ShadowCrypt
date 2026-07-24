@@ -1,0 +1,360 @@
+/* stylelint-disable */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* SylvaCrypt Design System — Clean Messenger Theme (Secure / Telegram style) */
+@layer base {
+  /* ── Light Mode (default) ── */
+  :root {
+    --bubble-border-width: 0px;
+    --bubble-border: 0 0% 0%;
+    --radius: 0.5rem;
+
+    /* Surfaces */
+    --background: 0 0% 96%;
+    --foreground: 220 13% 13%;
+    --card: 0 0% 100%;
+    --card-foreground: 220 13% 13%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 13% 13%;
+
+    /* Primary — blue */
+    --primary: 217 91% 50%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary */
+    --secondary: 220 14% 92%;
+    --secondary-foreground: 220 13% 25%;
+
+    /* Muted */
+    --muted: 220 14% 91%;
+    --muted-foreground: 220 9% 46%;
+
+    /* Accent */
+    --accent: 217 91% 95%;
+    --accent-foreground: 217 91% 35%;
+
+    /* Destructive */
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Borders / inputs */
+    --border: 220 13% 87%;
+    --input: 220 13% 95%;
+    --ring: 217 91% 50%;
+
+    /* Charts */
+    --chart-1: 217 91% 50%;
+    --chart-2: 142 71% 45%;
+    --chart-3: 270 67% 58%;
+    --chart-4: 30 80% 55%;
+    --chart-5: 340 75% 55%;
+
+    /* Status */
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+    --info: 199 89% 48%;
+    --info-foreground: 0 0% 100%;
+
+    /* Sidebar */
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 220 13% 18%;
+    --sidebar-primary: 217 91% 50%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 14% 95%;
+    --sidebar-accent-foreground: 220 13% 25%;
+    --sidebar-border: 220 13% 90%;
+    --sidebar-ring: 217 91% 50%;
+  }
+
+  /* ── Dark Mode ── */
+  .dark {
+    --bubble-border-width: 0px;
+    
+    /* Surfaces */
+    --background: 222 22% 10%;
+    --foreground: 210 20% 92%;
+    --card: 222 22% 13%;
+    --card-foreground: 210 20% 92%;
+    --popover: 222 22% 14%;
+    --popover-foreground: 210 20% 92%;
+
+    /* Primary — slightly lighter blue for dark */
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary */
+    --secondary: 222 22% 18%;
+    --secondary-foreground: 210 14% 75%;
+
+    /* Muted */
+    --muted: 222 22% 16%;
+    --muted-foreground: 215 14% 55%;
+
+    /* Accent */
+    --accent: 217 40% 20%;
+    --accent-foreground: 217 91% 75%;
+
+    /* Destructive */
+    --destructive: 0 65% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Borders / inputs */
+    --border: 222 18% 22%;
+    --input: 222 22% 16%;
+    --ring: 217 91% 60%;
+
+    /* Charts */
+    --chart-1: 217 91% 60%;
+    --chart-2: 142 65% 50%;
+    --chart-3: 270 67% 65%;
+    --chart-4: 30 75% 58%;
+    --chart-5: 340 70% 58%;
+
+    /* Status */
+    --success: 142 65% 50%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 55%;
+    --warning-foreground: 0 0% 0%;
+    --info: 199 89% 55%;
+    --info-foreground: 0 0% 100%;
+
+    /* Sidebar */
+    --sidebar-background: 222 22% 11%;
+    --sidebar-foreground: 210 14% 82%;
+    --sidebar-primary: 217 91% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 222 22% 17%;
+    --sidebar-accent-foreground: 210 14% 82%;
+    --sidebar-border: 222 18% 20%;
+    --sidebar-ring: 217 91% 60%;
+  }
+
+  .theme-mint {
+    --bubble-border-width: 0px;
+    
+    --background: 0 0% 96%;
+    --foreground: 220 13% 13%;
+    --card: 0 0% 100%;
+    --card-foreground: 220 13% 13%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 13% 13%;
+
+    /* Teal message bubbles */
+    --primary: 175 70% 40%;
+    --primary-foreground: 0 0% 100%;
+    
+    /* Mint send button */
+    --send-btn: 150 70% 50%;
+    --send-btn-foreground: 0 0% 10%;
+
+    --secondary: 220 14% 92%;
+    --secondary-foreground: 220 13% 25%;
+    --muted: 220 14% 91%;
+    --muted-foreground: 220 9% 46%;
+    --accent: 175 70% 95%;
+    --accent-foreground: 175 70% 35%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 14% 90%;
+    --input: 220 14% 90%;
+    --ring: 175 70% 40%;
+    --sidebar-background: 0 0% 96%;
+    --sidebar-foreground: 220 13% 13%;
+    --sidebar-primary: 175 70% 40%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 14% 92%;
+    --sidebar-accent-foreground: 220 13% 25%;
+    --sidebar-border: 220 14% 90%;
+    --sidebar-ring: 175 70% 40%;
+  }
+
+  .theme-mint-dark {
+    /* Charcoal Dark background overrides */
+    --background: 0 0% 10%;
+    --foreground: 0 0% 95%;
+    --card: 0 0% 12%;
+    --card-foreground: 0 0% 95%;
+    --popover: 0 0% 12%;
+    --popover-foreground: 0 0% 95%;
+    --muted: 0 0% 15%;
+    --muted-foreground: 0 0% 65%;
+    --border: 0 0% 18%;
+    --input: 0 0% 15%;
+
+    --sidebar-background: 0 0% 8%;
+    --sidebar-foreground: 0 0% 85%;
+    --sidebar-accent: 0 0% 15%;
+    --sidebar-accent-foreground: 0 0% 95%;
+    --sidebar-border: 0 0% 15%;
+
+    /* Olive Dusk: override primary with muted olive/mint colors */
+    --primary: 175 70% 40%;
+    --primary-foreground: 0 0% 100%;
+    
+    /* Mint send button */
+    --send-btn: 150 70% 50%;
+    --send-btn-foreground: 0 0% 10%;
+
+    --ring: 175 70% 40%;
+    
+    --accent: 175 70% 20%;
+    --accent-foreground: 175 70% 75%;
+
+    --sidebar-primary: 175 70% 40%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-ring: 175 70% 40%;
+  }
+
+  .theme-ember {
+    --background: 20 12% 7%;
+    --sidebar-background: 20 14% 5%;
+    
+    --primary: 22 70% 45%;
+    --primary-foreground: 0 0% 100%;
+    
+    --bubble-sent-bg: hsl(22, 65%, 38%);
+    --bubble-sent-text: hsl(0, 0%, 96%);
+    --bubble-sent-border: transparent;
+    --bubble-border-width: 0px;
+    
+    --bubble-recv-bg: hsl(20, 10%, 13%);
+    --bubble-recv-text: hsl(0, 0%, 96%);
+    --bubble-recv-border: hsl(20, 15%, 18%);
+    --bubble-recv-border-width: 1px;
+    
+    --send-btn: 28 80% 50%;
+    --send-btn-foreground: 0 0% 10%;
+    
+    --accent: 22 60% 35%;
+    --accent-foreground: 0 0% 100%;
+    --input: 20 10% 11%;
+    --border: 20 15% 18%;
+    --muted-foreground: 20 8% 50%;
+    --muted: 20 10% 15%;
+    
+    --foreground: 0 0% 90%;
+    --card: 20 10% 9%;
+    --card-foreground: 0 0% 90%;
+    --popover: 20 10% 9%;
+    --popover-foreground: 0 0% 90%;
+    
+    --ring: 22 70% 45%;
+    --sidebar-primary: 22 70% 45%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-border: 20 15% 18%;
+    --sidebar-ring: 22 70% 45%;
+  }
+
+  .theme-neon-noir {
+    --background: 0 0% 5%;
+    --sidebar-background: 0 0% 3%;
+    
+    --primary: 185 100% 45%;
+    --primary-foreground: 0 0% 0%;
+    --bubble-sent-bg: hsl(0, 0%, 10%);
+    --bubble-sent-text: hsl(0, 0%, 100%);
+    --bubble-sent-border: hsl(185, 100%, 45%);
+    --bubble-border-width: 1.5px;
+    --bubble-sent-shadow: 0 0 0 1px hsl(185, 100%, 45%), 0 0 10px 2px hsla(185, 100%, 45%, 0.15);
+    
+    --bubble-recv-bg: hsl(0, 0%, 10%);
+    --bubble-recv-text: hsl(0, 0%, 100%);
+    --bubble-recv-border: hsl(185, 100%, 45%);
+    --bubble-recv-border-width: 1.5px;
+    --bubble-recv-shadow: 0 0 0 1px hsl(185, 100%, 45%), 0 0 10px 2px hsla(185, 100%, 45%, 0.15);
+
+    --send-btn: 185 100% 45%;
+    --send-btn-foreground: 0 0% 0%;
+
+    --input: 0 0% 8%;
+    --border: 0 0% 15%;
+    --muted-foreground: 0 0% 45%;
+    --muted: 0 0% 12%;
+    
+    --foreground: 0 0% 90%;
+    --card: 0 0% 5%;
+    --card-foreground: 0 0% 90%;
+    --popover: 0 0% 5%;
+    --popover-foreground: 0 0% 90%;
+    --accent: 185 100% 15%;
+    --accent-foreground: 185 100% 45%;
+    
+    --ring: 185 100% 45%;
+    --sidebar-primary: 185 100% 45%;
+    --sidebar-primary-foreground: 0 0% 0%;
+    --sidebar-border: 0 0% 15%;
+    --sidebar-ring: 185 100% 45%;
+  }
+  * {
+    @apply border-border;
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 5px;
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 3px;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-feature-settings: 'rlig' 1, 'calt' 1;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+@layer utilities {
+  /* Encrypted badge */
+  .badge-encrypted {
+    @apply inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary text-xs font-medium px-2 py-0.5;
+  }
+
+  /* Monospaced fingerprint */
+  .fingerprint {
+    font-family: 'Roboto Mono', 'Courier New', monospace;
+    @apply text-xs text-muted-foreground break-all;
+  }
+
+  /* Sent message bubble */
+  .bubble-sent {
+    background-color: var(--bubble-sent-bg, hsl(var(--primary)));
+    color: var(--bubble-sent-text, hsl(var(--primary-foreground)));
+    border: var(--bubble-border-width, 0px) solid var(--bubble-sent-border, transparent);
+    box-shadow: var(--bubble-sent-shadow, none);
+    @apply rounded-2xl rounded-br-sm px-4 py-2;
+  }
+
+  /* Received message bubble */
+  .bubble-received {
+    background-color: var(--bubble-recv-bg, hsl(var(--card)));
+    color: var(--bubble-recv-text, hsl(var(--card-foreground)));
+    border: var(--bubble-recv-border-width, 1px) solid var(--bubble-recv-border, hsl(var(--border)));
+    box-shadow: var(--bubble-recv-shadow, none);
+    @apply rounded-2xl rounded-bl-sm px-4 py-2;
+  }
+}
+
+/* Typing indicator dot bounce animation */
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30%           { transform: translateY(-4px); opacity: 1; }
+}
+
+/* Reduced-motion support: respect the OS/browser accessibility preference.
+   This disables CSS transitions and animations for users who opt out of motion. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,0 +1,1 @@
+COMMENT ON COLUMN profiles.password_version IS '0 = legacy 6-digit PIN, 1 = new 6-20 char password with complexity requirements';

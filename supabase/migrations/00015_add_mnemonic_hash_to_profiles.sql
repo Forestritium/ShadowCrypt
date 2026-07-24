@@ -1,0 +1,2 @@
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS mnemonic_hash text;
+COMMENT ON COLUMN profiles.mnemonic_hash IS 'SHA-256 hex digest of the BIP-39 recovery phrase; used for forgot-password verification without storing the phrase itself';
